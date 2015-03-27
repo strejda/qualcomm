@@ -1,0 +1,20 @@
+# $FreeBSD$
+machine		arm	armv6
+#cpu 		CPU_KRAIT
+cpu 		CPU_CORTEXA
+#makeoptions	CONF_CFLAGS="-mcpu=cortex-a15 -O3"
+makeoptions	CONF_CFLAGS="-march=armv7a"
+makeoptions	ARM_LITTLE_ENDIAN
+options		ARM_L2_PIPT
+
+options		KERNVIRTADDR		= 0xc0200000
+makeoptions	KERNVIRTADDR		= 0xc0200000
+options		KERNPHYSADDR		= 0x80200000
+makeoptions	KERNPHYSADDR		= 0x80200000
+options		PHYSADDR		= 0x80000000
+
+options		IPI_IRQ_START=0
+options		IPI_IRQ_END=15
+
+files "../qualcomm/apq8064/files.apq8064"
+
