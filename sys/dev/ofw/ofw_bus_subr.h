@@ -88,7 +88,7 @@ void	ofw_bus_find_iparent(phandle_t);
 int ofw_bus_is_compatible(device_t, const char *);
 int ofw_bus_is_compatible_strict(device_t, const char *);
 
-/* 
+/*
  * Helper routine to search a list of compat properties.  The table is
  * terminated by an entry with a NULL compat-string pointer; a pointer to that
  * table entry is returned if none of the compat strings match for the device,
@@ -109,5 +109,10 @@ phandle_t ofw_bus_find_child(phandle_t, const char *);
 
 /* Helper routine to find a device_t child matchig a given phandle_t */
 device_t ofw_bus_find_child_device_by_phandle(device_t bus, phandle_t node);
+
+/* Helper routine for parsing lists  */
+int ofw_bus_parse_xref_list_alloc(phandle_t , char *, char *, int ,
+    phandle_t *, int *, pcell_t **);
+int ofw_bus_find_string_index(phandle_t , char *, char *, int *);
 
 #endif /* !_DEV_OFW_OFW_BUS_SUBR_H_ */

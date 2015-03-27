@@ -173,7 +173,7 @@ ofw_bus_status_okay(device_t dev)
 	if (status == NULL || strcmp(status, "okay") == 0 ||
 	    strcmp(status, "ok") == 0)
 		return (1);
-	
+
 	return (0);
 }
 
@@ -456,7 +456,7 @@ ofw_bus_intr_to_rl(device_t dev, phandle_t node,
 			}
 			iparent = OF_xref_from_node(iparent);
 		}
-		if (OF_searchencprop(OF_node_from_xref(iparent), 
+		if (OF_searchencprop(OF_node_from_xref(iparent),
 		    "#interrupt-cells", &icells, sizeof(icells)) == -1) {
 			device_printf(dev, "Missing #interrupt-cells "
 			    "property, assuming <1>\n");
@@ -480,7 +480,7 @@ ofw_bus_intr_to_rl(device_t dev, phandle_t node,
 	for (i = 0; i < nintr; i += icells) {
 		if (extended) {
 			iparent = intr[i++];
-			if (OF_searchencprop(OF_node_from_xref(iparent), 
+			if (OF_searchencprop(OF_node_from_xref(iparent),
 			    "#interrupt-cells", &icells, sizeof(icells)) == -1) {
 				device_printf(dev, "Missing #interrupt-cells "
 				    "property\n");
@@ -592,4 +592,91 @@ ofw_bus_find_child_device_by_phandle(device_t bus, phandle_t node)
 	free(children, M_TEMP);
 
 	return (retval);
+}
+
+/*
+ * Parse property that contain list of xrefs and values
+ * (like standard "clocks" and "resets" properties)
+ * Input arguments:
+ *  node - consumers device node
+ *  list_name  - name of parsed list - "clocks"
+ *  cells_name - name of size property - "#clock-cells"
+ * Output arguments:
+ *  producer - hande of producer
+ *  ncells   - number of cells in result
+ *  cells    - array of decoded cells
+ */
+int
+ofw_bus_parse_xref_list_alloc(phandle_t node, char *list_name, char *cells_name,
+    int idx, phandle_t *producer, int *ncells, pcell_t **cells)
+{
+	phandle_t pnode;
+	phandle_t *elems;
+	uint32_t  pcells;
+	int rv, i, j, nelems, cnt;
+
+	elems = NULL;
+	nelems = OF_getencprop_alloc(node, list_name,  sizeof(*elems),
+	    (void **)&elems);
+	if (nelems <= 0)
+		return (ENOENT);
+	rv = ENOENT;
+	for (i = 0, cnt = 0; i < nelems; i += pcells, cnt++) {
+		pnode = elems[i++];
+		if (OF_searchencprop(OF_node_from_xref(pnode),
+		    cells_name, &pcells, sizeof(pcells)) == -1) {
+			printf("Missing %s property\n", cells_name);
+			rv = ENOENT;
+			break;
+		}
+
+		if (pcells < 1 || (i + pcells) > nelems) {
+			printf("Invalid %s property value <%d>\n", cells_name,
+			    pcells);
+			rv = ERANGE;
+			break;
+		}
+		if (cnt == idx) {
+			*cells= malloc(pcells * sizeof(**cells), M_OFWPROP,
+			    M_WAITOK);
+			*producer = pnode;
+			*ncells = pcells;
+			for (j = 0; j < pcells; j++)
+				(*cells)[j] = elems[i + j];
+			rv = 0;
+			break;
+		}
+	}
+	if (elems != NULL)
+		free(elems, M_OFWPROP);
+	return (rv);
+}
+
+/*
+ * Find index of string in string list property (case sensitive).
+ */
+int
+ofw_bus_find_string_index(phandle_t node, char *list_name, char *name, int *idx)
+{
+	char *elems;
+	int rv, i, cnt, nelems;
+
+	elems = NULL;
+	nelems = OF_getprop_alloc(node, list_name, 1, (void **)&elems);
+	if (nelems <= 0)
+		return (ENOENT);
+
+	rv = ENOENT;
+	for (i = 0, cnt = 0; i < nelems; cnt++) {
+		if (strcmp(elems + i, name) == 0) {
+			*idx = cnt;
+			rv = 0;
+			break;
+		}
+		i += strlen(elems + i) + 1;
+	}
+
+	if (elems != NULL)
+		free(elems, M_OFWPROP);
+	return (rv);
 }
