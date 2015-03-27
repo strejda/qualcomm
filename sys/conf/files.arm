@@ -85,8 +85,14 @@ cddl/compat/opensolaris/kern/opensolaris_atomic.c	optional zfs | dtrace compile-
 cddl/dev/dtrace/arm/dtrace_asm.S			optional dtrace compile-with "${DTRACE_S}"
 cddl/dev/dtrace/arm/dtrace_subr.c			optional dtrace compile-with "${DTRACE_C}"
 cddl/dev/fbt/arm/fbt_isa.c				optional dtrace_fbt | dtraceall compile-with "${FBT_C}"
-crypto/blowfish/bf_enc.c	optional	crypto | ipsec 
+crypto/blowfish/bf_enc.c	optional	crypto | ipsec
 crypto/des/des_enc.c		optional	crypto | ipsec | netsmb
+dev/clk/clk.c			optional	ARM_CLK_FRAMEWORK
+dev/clk/clknode_if.m		optional	ARM_CLK_FRAMEWORK
+dev/clk/clk_div.c		optional	ARM_CLK_FRAMEWORK
+dev/clk/clk_fixed.c		optional	ARM_CLK_FRAMEWORK
+dev/clk/clk_gate.c		optional	ARM_CLK_FRAMEWORK
+dev/clk/clk_mux.c		optional	ARM_CLK_FRAMEWORK
 dev/dwc/if_dwc.c		optional	dwc
 dev/dwc/if_dwc_if.m		optional	dwc
 dev/fb/fb.c			optional	sc
