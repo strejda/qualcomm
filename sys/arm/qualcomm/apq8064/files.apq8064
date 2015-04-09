@@ -5,11 +5,9 @@
 #
 arm/arm/bus_space_asm_generic.S		standard
 arm/arm/bus_space_generic.c		standard
-arm/arm/cpufunc_asm_arm11.S		standard
-arm/arm/cpufunc_asm_armv5.S		standard
-arm/arm/cpufunc_asm_armv7.S		standard
 kern/kern_clocksource.c			standard
 arm/arm/gic.c				standard
+arm/arm/amba.c				standard
 arm/arm/bus_space_base.c		standard
 
 #
@@ -18,6 +16,13 @@ arm/arm/bus_space_base.c		standard
 arm/qualcomm/apq8064/apq8064_machdep.c	standard
 arm/qualcomm/msm_uart.c			standard
 arm/qualcomm/mmci.c			standard
+arm/qualcomm/qcom_gsbi.c		standard
+arm/qualcomm/apq8064/apq8064_clk_pll.c	standard
+arm/qualcomm/apq8064/apq8064_clk_rcg.c	standard
+arm/qualcomm/apq8064/apq8064_clk_br.c	standard
+arm/qualcomm/apq8064/apq8064_mcc.c	standard
+arm/qualcomm/apq8064/apq8064_gcc.c	standard
+arm/qualcomm/apq8064/apq8064_pinctrl.c	standard
 
 #
 # Board devices.

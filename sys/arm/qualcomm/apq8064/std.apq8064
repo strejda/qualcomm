@@ -1,9 +1,9 @@
 # $FreeBSD$
 machine		arm	armv6
-#cpu 		CPU_KRAIT
-cpu 		CPU_CORTEXA
+cpu 		CPU_KRAIT
+#cpu 		CPU_CORTEXA
 #makeoptions	CONF_CFLAGS="-mcpu=cortex-a15 -O3"
-makeoptions	CONF_CFLAGS="-march=armv7a"
+makeoptions	CONF_CFLAGS="-march=armv7a -fno-omit-frame-pointer"
 makeoptions	ARM_LITTLE_ENDIAN
 options		ARM_L2_PIPT
 
