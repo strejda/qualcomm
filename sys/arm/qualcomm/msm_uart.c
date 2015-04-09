@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/fdt.h>
 
+#include <dev/clk/clk.h>
 #include <dev/uart/uart.h>
 #include <dev/uart/uart_cpu.h>
 #include <dev/uart/uart_cpu_fdt.h>
@@ -48,44 +49,23 @@ __FBSDID("$FreeBSD$");
 
 #include "uart_if.h"
 
-#define	DEF_CLK		7372800
-
 #define	RD4(bas, reg)	\
     bus_space_read_4((bas)->bst, (bas)->bsh, (reg))
 #define WR4(bas, reg, value)	\
     bus_space_write_4((bas)->bst, (bas)->bsh, (reg), (value))
 
-
 struct msm_uart_softc {
-	struct uart_softc base;
-	uint32_t ier;
-	uint32_t readbuf;
-	uint32_t readcnt;
+	struct uart_softc 	base;
+	clk_t			core_clk;
+	clk_t			iface_clk;
+	uint32_t		ier;
+	uint32_t		readbuf;
+	uint32_t		readcnt;
 };
-
-
-static int msm_uart_uart_param(struct uart_bas *, int, int, int, int);
 
 /*
- * Low-level UART interface.
+ * UART class interface.
  */
-static int msm_uart_probe(struct uart_bas *bas);
-static void msm_uart_init(struct uart_bas *bas, int, int, int, int);
-static void msm_uart_term(struct uart_bas *bas);
-static void msm_uart_putc(struct uart_bas *bas, int);
-static int msm_uart_rxready(struct uart_bas *bas);
-static int msm_uart_getc(struct uart_bas *bas, struct mtx *mtx);
-
-struct uart_ops uart_msm_uart_ops = {
-	.probe = msm_uart_probe,
-	.init = msm_uart_init,
-	.term = msm_uart_term,
-	.putc = msm_uart_putc,
-	.rxready = msm_uart_rxready,
-	.getc = msm_uart_getc,
-};
-
-
 static int
 msm_uart_uart_param(struct uart_bas *bas, int baudrate, int databits,
     int stopbits, int parity)
@@ -166,12 +146,12 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 {
 	struct msm_uart_softc *sc = (struct msm_uart_softc *)bas;
 	uint32_t tmp, rxstale;
-	
+
 	sc->readbuf = 0;
 	sc->readcnt = 0;
 
 
-	
+
 	/* Configure UART mode registers MR1 and MR2 */
 	/* Hardware flow control isn't supported */
 	WR4(bas, UART_DM_MR1, 0x0);
@@ -182,7 +162,7 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 	/* Configure Tx and Rx watermarks configuration registers */
 	/*
 	 * TX watermark value is set to 0 - interrupt is generated when
-	 * FIFO level is less than or equal to 0 
+	 * FIFO level is less than or equal to 0
 	 */
 	WR4(bas, UART_DM_TFWR, UART_DM_TFW_VALUE);
 
@@ -194,7 +174,7 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 	tmp |= UART_DM_IPR_STALE_LAST;
 	tmp |= UART_DM_IPR_STALE_TIMEOUT_MSB_MASK & (rxstale << 2);
 	WR4(bas, UART_DM_IPR, tmp);
-	
+
 
 	/* Configure Interrupt Programming Register */
 	/* Set initial Stale timeout value */
@@ -229,8 +209,8 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 	/* Enable transmitter and receiver */
 	WR4(bas, UART_DM_CR, UART_DM_CR_RX_ENABLE);
 	WR4(bas, UART_DM_CR, UART_DM_CR_TX_ENABLE);
-	
-	/* Clear stale status */ 
+
+	/* Clear stale status */
 	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
 	WR4(bas, UART_DM_DMRX, 0xFFFFFF);
 	WR4(bas, UART_DM_CR, UART_DM_STALE_EVENT_ENABLE);
@@ -247,9 +227,9 @@ static void
 msm_uart_putc(struct uart_bas *bas, int c)
 {
 
-	/* 
+	/*
 	 * BEWARE !!! TX expect UART_DM_NO_CHARS_FOR_TX chars to be proccesed,
-	 * and same number of writes must be made to UART_DM_TF - address 
+	 * and same number of writes must be made to UART_DM_TF - address
 	 * (index) have ho meaning.
 	 * But UART_DM_NO_CHARS_FOR_TX can be changed only if TX FIFO is empty
 	 * Moreover, the UART_DM_NO_CHARS_FOR_TX must be set before each write
@@ -266,7 +246,7 @@ msm_uart_rxready(struct uart_bas *bas)
 {
 	struct msm_uart_softc *sc = (struct msm_uart_softc *)bas;
 
-	return ((sc->readcnt > 0) || 
+	return ((sc->readcnt > 0) ||
 	    (RD4(bas, UART_DM_SR) & UART_DM_SR_RXRDY) ||
 	    (UART_DM_RXFS_BUF_STATE(RD4(bas, UART_DM_RXFS)) > 0));
 }
@@ -304,7 +284,7 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 		sc->readcnt = 4;
 		sc->readbuf >>= 8;
 		sc->readcnt--;
-		
+
 		uart_unlock(mtx);
 		return (c);
 	}
@@ -327,41 +307,20 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 	uart_unlock(mtx);
 	return (c);
 };
-	
-/*
- * High-level UART interface.
- */
 
-static int msm_uart_bus_probe(struct uart_softc *sc);
-static int msm_uart_bus_attach(struct uart_softc *sc);
-static int msm_uart_bus_flush(struct uart_softc *, int);
-static int msm_uart_bus_getsig(struct uart_softc *);
-static int msm_uart_bus_ioctl(struct uart_softc *, int, intptr_t);
-static int msm_uart_bus_ipend(struct uart_softc *);
-static int msm_uart_bus_param(struct uart_softc *, int, int, int, int);
-static int msm_uart_bus_receive(struct uart_softc *);
-static int msm_uart_bus_setsig(struct uart_softc *, int);
-static int msm_uart_bus_transmit(struct uart_softc *);
-static void msm_uart_bus_grab(struct uart_softc *);
-static void msm_uart_bus_ungrab(struct uart_softc *);
-
-static kobj_method_t msm_uart_methods[] = {
-	KOBJMETHOD(uart_probe,		msm_uart_bus_probe),
-	KOBJMETHOD(uart_attach, 	msm_uart_bus_attach),
-	KOBJMETHOD(uart_flush,		msm_uart_bus_flush),
-	KOBJMETHOD(uart_getsig,		msm_uart_bus_getsig),
-	KOBJMETHOD(uart_ioctl,		msm_uart_bus_ioctl),
-	KOBJMETHOD(uart_ipend,		msm_uart_bus_ipend),
-	KOBJMETHOD(uart_param,		msm_uart_bus_param),
-	KOBJMETHOD(uart_receive,	msm_uart_bus_receive),
-	KOBJMETHOD(uart_setsig,		msm_uart_bus_setsig),
-	KOBJMETHOD(uart_transmit,	msm_uart_bus_transmit),
-	KOBJMETHOD(uart_grab,		msm_uart_bus_grab),
-	KOBJMETHOD(uart_ungrab,		msm_uart_bus_ungrab),
-	{0, 0 }
+struct uart_ops uart_msm_uart_ops = {
+	.probe = msm_uart_probe,
+	.init = msm_uart_init,
+	.term = msm_uart_term,
+	.putc = msm_uart_putc,
+	.rxready = msm_uart_rxready,
+	.getc = msm_uart_getc,
 };
 
-int
+/*
+ * UART bus interface.
+ */
+static int
 msm_uart_bus_probe(struct uart_softc *sc)
 {
 
@@ -391,7 +350,7 @@ msm_uart_bus_attach(struct uart_softc *sc)
 }
 
 /*
- * Write the current transmit buffer to the TX FIFO. 
+ * Write the current transmit buffer to the TX FIFO.
  */
 static int
 msm_uart_bus_transmit(struct uart_softc *sc)
@@ -593,6 +552,22 @@ msm_uart_bus_ungrab(struct uart_softc *sc)
 	uart_unlock(sc->sc_hwmtx);
 }
 
+static kobj_method_t msm_uart_methods[] = {
+	KOBJMETHOD(uart_probe,		msm_uart_bus_probe),
+	KOBJMETHOD(uart_attach, 	msm_uart_bus_attach),
+	KOBJMETHOD(uart_flush,		msm_uart_bus_flush),
+	KOBJMETHOD(uart_getsig,		msm_uart_bus_getsig),
+	KOBJMETHOD(uart_ioctl,		msm_uart_bus_ioctl),
+	KOBJMETHOD(uart_ipend,		msm_uart_bus_ipend),
+	KOBJMETHOD(uart_param,		msm_uart_bus_param),
+	KOBJMETHOD(uart_receive,	msm_uart_bus_receive),
+	KOBJMETHOD(uart_setsig,		msm_uart_bus_setsig),
+	KOBJMETHOD(uart_transmit,	msm_uart_bus_transmit),
+	KOBJMETHOD(uart_grab,		msm_uart_bus_grab),
+	KOBJMETHOD(uart_ungrab,		msm_uart_bus_ungrab),
+	{0, 0 }
+};
+
 struct uart_class uart_msm_uart_class = {
 	"msm_uart",
 	msm_uart_methods,
@@ -602,76 +577,103 @@ struct uart_class uart_msm_uart_class = {
 	.uc_rclk = 0,
 };
 
-/* Compatible devices. */
 static struct ofw_compat_data compat_data[] = {
-	{"qcom,uart-dm", (uintptr_t)&uart_msm_uart_class},
-	{NULL,			(uintptr_t)NULL},
+	{"qcom,uart-dm",		(uintptr_t)&uart_msm_uart_class},
+	{"qcom,msm-uartdm",		(uintptr_t)&uart_msm_uart_class},
+	{"qcom,msm-uartdm-v1.3",	(uintptr_t)&uart_msm_uart_class},
+	{NULL,				(uintptr_t)NULL},
 };
 UART_FDT_CLASS(compat_data);
 
-
-
-static int
-msm_uart_dev_probe(device_t dev)
-{
-	struct msm_uart_softc *sc;
-//	phandle_t node;
-//	uint64_t freq;
-//	int shift;
-//	int rv;
-	const struct ofw_compat_data *cd;
-
-	sc = device_get_softc(dev);
-	if (!ofw_bus_status_okay(dev))
-		return (ENXIO);
-	cd = ofw_bus_search_compatible(dev, compat_data);
-	if (cd->ocd_data == 0)
-		return (ENXIO);
-	sc->base.sc_class = (struct uart_class *)cd->ocd_data;
-#if 0
-	node = ofw_bus_get_node(dev);
-	shift = uart_fdt_get_shift(node);
-	rv = clk_get_by_ofw_index(node, 0, &sc->clk);
-	if (rv != 0) {
-		device_printf(dev, "Cannot get UART clock: %d\n", rv);
-		return (ENXIO);
-	}
-	rv = clk_enable(sc->clk);
-	if (rv != 0) {
-		device_printf(dev, "Cannot enable UART clock: %d\n", rv);
-		return (ENXIO);
-	}
-	rv = clk_get_freq(sc->clk, &freq);
-	if (rv != 0) {
-		device_printf(dev, "Cannot enable UART clock: %d\n", rv);
-		return (ENXIO);
-	}
-	sc->ns8250_base.busy_detect = 1;
-	sc->ns8250_base.busy_detect = 1;
-	device_printf(dev, "got UART clock: %lld\n", freq);	
-	return (uart_bus_probe(dev, shift, (int)freq, 0, 0));
-#endif
-	return (uart_bus_probe(dev, 0, (int)DEF_CLK, 0, 0));
-
-}
-
+/*
+ * Device interface.
+ */
 static int
 msm_uart_dev_detach(device_t dev)
 {
 	struct msm_uart_softc *sc;
 
 	sc = device_get_softc(dev);
-//	if (sc->clk != NULL) {
-//		clk_release(sc->clk);
-//	}
-
+	if (sc->core_clk != NULL)
+		clk_release(sc->core_clk);
+	if (sc->iface_clk != NULL)
+		clk_release(sc->iface_clk);
 	return (uart_bus_detach(dev));
+}
+
+static int
+msm_uart_dev_probe(device_t dev)
+{
+	struct msm_uart_softc *sc;
+	const struct ofw_compat_data *cd;
+
+	sc = device_get_softc(dev);
+	if (!ofw_bus_status_okay(dev))
+		return (ENXIO);
+
+	cd = ofw_bus_search_compatible(dev, compat_data);
+	if (cd->ocd_data == 0)
+		return (ENXIO);
+	sc->base.sc_class = (struct uart_class *)cd->ocd_data;
+	return (uart_bus_probe(dev, 0, 0, 0, 0));
+
+}
+
+static int
+msm_uart_dev_attach(device_t dev)
+{
+	struct msm_uart_softc *sc;
+	phandle_t node;
+	uint64_t freq;
+	int rv;
+
+	sc = device_get_softc(dev);
+	node = ofw_bus_get_node(dev);
+
+	/* Enable interface clock */
+	rv = clk_get_by_ofw_name(node, "iface", &sc->iface_clk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get iface clock: %d\n", rv);
+		goto fail;
+	}
+	rv = clk_enable(sc->iface_clk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot enable iface clock: %d\n", rv);
+		goto fail;
+	}
+
+	/* Enable core clock */
+	rv = clk_get_by_ofw_name(node, "core", &sc->core_clk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get core clock: %d\n", rv);
+		goto fail;
+	}
+	rv = clk_enable(sc->core_clk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot enable core clock: %d\n", rv);
+		goto fail;;
+	}
+	rv = clk_get_freq(sc->core_clk, &freq);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
+		goto fail;
+	}
+device_printf(dev, "got UART clock: %lld\n", freq);
+
+	return (uart_bus_attach(dev));
+
+fail:
+	if (sc->core_clk != NULL)
+		clk_release(sc->core_clk);
+	if (sc->iface_clk != NULL)
+		clk_release(sc->iface_clk);
+	return (ENXIO);
 }
 
 static device_method_t msm_uart_dev_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,		msm_uart_dev_probe),
-	DEVMETHOD(device_attach,	uart_bus_attach),
+	DEVMETHOD(device_attach,	msm_uart_dev_attach),
 	DEVMETHOD(device_detach,	msm_uart_dev_detach),
 	{ 0, 0 }
 };
@@ -684,3 +686,4 @@ static driver_t msm_uart_driver = {
 
 DRIVER_MODULE(msm_uart, simplebus,  msm_uart_driver, uart_devclass,
     0, 0);
+

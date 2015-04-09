@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/resource.h>
 #include <machine/intr.h>
 
+#include <dev/clk/clk.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -78,6 +79,10 @@ struct mmci_softc {
 	struct resource		*mem_res;
 	struct resource 	*irq_res;
 	void 			*intrhand;
+	clk_t			mclk;
+	clk_t			pclk;
+	int			clk_freq;
+	
 	struct mmc_host		host;
 	struct mmc_request 	*req;
 	uint32_t		fdt_caps;
@@ -541,7 +546,6 @@ mmci_write_ivar(device_t bus, device_t child, int which,
 	return (0);
 }
 
-#define MMCI_SD_CLK 10000000000
 static int
 mmci_update_ios(device_t bus, device_t child)
 {
@@ -551,10 +555,10 @@ mmci_update_ios(device_t bus, device_t child)
 
 	if (ios->clock != 0) {
 		/* Calculate clock divider */
-		clkdiv = (MMCI_SD_CLK / (2 * ios->clock)) - 1;
+		clkdiv = (sc->clk_freq  / (2 * ios->clock)) - 1;
 
 		/* Clock rate should not exceed rate requested in ios */
-		if ((MMCI_SD_CLK / (2 * (clkdiv + 1))) > ios->clock)
+		if ((sc->clk_freq / (2 * (clkdiv + 1))) > ios->clock)
 			clkdiv++;
 		if (clkdiv > 255)
 			clkdiv = 255;
@@ -680,24 +684,66 @@ mmci_attach(device_t dev)
 	struct mmci_softc *sc = device_get_softc(dev);
 	device_t child;
 	int rid, rv;
+	phandle_t node;
+	uint64_t freq;
 
 	sc->dev = dev;
 	sc->req = NULL;
+	node = ofw_bus_get_node(dev);
 
 	rv = parse_fdt(sc);
 	if (rv != 0) {
 		device_printf(dev, "Can't get FDT property: %d.\n", rv);
 		return (rv);
 	}
-	
 	mtx_init(&sc->mtx, "mmci", "mmc", MTX_DEF);
+	
+	/* Enable interface clock */
+	rv = clk_get_by_ofw_name(node, "apb_pclk", &sc->pclk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get interface clock: %d\n", rv);
+		goto fail;
+	}
+	rv = clk_enable(sc->pclk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot enable interface clock: %d\n", rv);
+		goto fail;
+	}
+
+	/* Enable core clock */
+	rv = clk_get_by_ofw_name(node, "mclk", &sc->mclk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get core clock: %d\n", rv);
+		goto fail;
+	}
+	rv = clk_enable(sc->mclk);
+	if (rv != 0) {
+		device_printf(dev, "Cannot enable core clock: %d\n", rv);
+		goto fail;;
+	}
+	rv = clk_get_freq(sc->mclk, &freq);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
+		goto fail;
+	}
+	rv = clk_set_freq(sc->mclk, 51000000, 1);
+	if (rv != 0) {
+		device_printf(dev, "Cannot set clock frequency: %d\n", rv);
+//		goto fail;
+	}
+	rv = clk_get_freq(sc->mclk, &freq);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
+		goto fail;
+	}
+device_printf(dev, "got clock: %lld\n", freq);
 
 	rid = 0;
 	sc->mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
 	    RF_ACTIVE);
 	if (!sc->mem_res) {
 		device_printf(dev, "cannot allocate memory window\n");
-		return (ENXIO);
+		goto fail;
 	}
 
 	rid = 0;
@@ -705,30 +751,26 @@ mmci_attach(device_t dev)
 	    RF_ACTIVE);
 	if (!sc->irq_res) {
 		device_printf(dev, "cannot allocate interrupt\n");
-		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->mem_res);
-		return (ENXIO);
+		goto fail;
 	}
 	sc->use_pio = 1;
 	sc->pwrup_cmd = MCI_POWER_CTRL_ON;
 	
-/* clock */
+
 	WR4(sc, MCI_MASK0, 0);
 	WR4(sc, MCI_MASK1, 0);
 	WR4(sc, MCI_CLEAR, 0xFFF);
 
-	
-	sc->host.f_min = 144000;
-	sc->host.f_max = 50000000;
+	sc->clk_freq = (int)freq;
+	sc->host.f_max = sc->clk_freq;
+	sc->host.f_min = sc->clk_freq   / 254;
 	sc->host.host_ocr = MMC_OCR_320_330 | MMC_OCR_330_340;
 	sc->host.caps = MMC_CAP_4_BIT_DATA | MMC_CAP_HSPEED;
 
 	if (bus_setup_intr(dev, sc->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-	    NULL, mmci_intr, sc, &sc->intrhand))
-	{
-		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->mem_res);
-		bus_release_resource(dev, SYS_RES_IRQ, 0, sc->irq_res);
+	    NULL, mmci_intr, sc, &sc->intrhand)) {
 		device_printf(dev, "cannot setup interrupt handler\n");
-		return (ENXIO);
+		goto fail;
 	}
 
 	WR4(sc, MCI_MASK0, MCI_IRQENABLE);
@@ -736,12 +778,16 @@ mmci_attach(device_t dev)
 	child = device_add_child(dev, "mmc", -1);
 	if (!child) {
 		device_printf(dev, "attaching MMC bus failed!\n");
-		bus_teardown_intr(dev, sc->irq_res, sc->intrhand);
-		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->mem_res);
-		bus_release_resource(dev, SYS_RES_IRQ, 0, sc->irq_res);
-		return (ENXIO);
+		goto fail;
 	}
 	return (bus_generic_attach(dev));
+
+fail:
+	if (sc->mem_res != NULL)
+		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->mem_res);
+	if (sc->irq_res != NULL)
+		bus_release_resource(dev, SYS_RES_IRQ, 0, sc->irq_res);
+	return (ENXIO);	
 }
 
 static int
