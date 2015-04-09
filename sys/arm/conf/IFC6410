@@ -29,7 +29,8 @@ makeoptions	FDT_DTS_FILE=qcom-apq8064-ifc6410.dts
 
 makeoptions MODULES_OVERRIDE=""
 options 	BOOTVERBOSE
-#options 	ARM_NEW_PMAP
+options 	BOOTHOWTO=RB_SINGLE
+options 	ARM_NEW_PMAP
 
 # U-Boot stuff lives on slice 1, FreeBSD on slice 2.
 options 	ROOTDEVNAME=\"ufs:mmcsd0s2a\"
@@ -37,3 +38,7 @@ options 	ROOTDEVNAME=\"ufs:mmcsd0s2a\"
 option		SOCDEV_PA=0x16600000
 option		SOCDEV_VA=0x16600000
 option		EARLY_PRINTF
+
+#options 	KTR
+#options 	KTR_MASK=KTR_ALL-KTR
+#options 	KTR_ENTRIES=65536

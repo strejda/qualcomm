@@ -160,9 +160,10 @@ device		mmcsd			# SDCard disk device
 
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
-#device		fdt_reset
+device		fdt_pinctrl
+device		fdt_reset
 #device		fdt_phy
-#options 	ARM_CLK_FRAMEWORK
+options 	ARM_CLK_FRAMEWORK
 
 # SoC-specific devices
 
