@@ -40,28 +40,17 @@
 				};
 			};
 		};
-		
-		uart0: serial@16640000 {
-			status = "okay";
-			compatible = "qcom,uart-dm";
-			reg = <0x16640000 0x1000>;
-			reg-shift = <2>;
-			interrupts = <0 158 0x0>;
-			current-speed = <115200>;
-			clock-frequency = < 27000000 >;
-		};
 
 		gsbi@16600000 {
 			status = "okay";
 			qcom,mode = <GSBI_PROT_I2C_UART>;
-			serial@16640000 {
+			uart0: serial@16640000 {
 				status = "okay";
 			};
 		};
 
-/*
 		amba {
-*/
+
 			/* eMMC */
 			sdcc1: sdcc@12400000 {
 //				status = "okay";
@@ -78,8 +67,8 @@
 			sdcc4: sdcc@121c0000 {
 //				status = "okay";
 			};
-/*
+
 		};
-*/
+
 	};
 };

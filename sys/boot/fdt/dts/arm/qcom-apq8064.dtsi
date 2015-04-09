@@ -230,7 +230,6 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
-/*			uart0: */
 			 serial@16640000 {
 				compatible = "qcom,msm-uartdm-v1.3", "qcom,msm-uartdm";
 				reg = <0x16640000 0x1000>,
@@ -300,13 +299,13 @@
 			#dma-cells = <1>;
 			qcom,ee = <0>;
 		};
-/*
+
 		amba {
 			compatible = "arm,amba-bus";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
-*/
+
 			sdcc1: sdcc@12400000 {
 				status		= "disabled";
 				compatible	= "arm,pl18x", "arm,primecell";
@@ -365,8 +364,8 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&sdc4_gpios>;
 			};
-/*
+
 		};
-*/
+
 	};
 };
