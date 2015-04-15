@@ -51,6 +51,8 @@ __FBSDID("$FreeBSD$");
 
 #define	RD4(bas, reg)	\
     bus_space_read_4((bas)->bst, (bas)->bsh, (reg))
+#define	RD1(bas, reg)	\
+    bus_space_read_1((bas)->bst, (bas)->bsh, (reg))
 #define WR4(bas, reg, value)	\
     bus_space_write_4((bas)->bst, (bas)->bsh, (reg), (value))
 
@@ -59,6 +61,7 @@ struct msm_uart_softc {
 	clk_t			core_clk;
 	clk_t			iface_clk;
 	uint32_t		ier;
+	int			last_rx_cnt;
 	uint32_t		readbuf;
 	uint32_t		readcnt;
 };
@@ -127,7 +130,6 @@ msm_uart_uart_param(struct uart_bas *bas, int baudrate, int databits,
 
 	/* Set 115200 for both TX and RX. */;
 	WR4(bas, UART_DM_CSR, UART_DM_CSR_115200);
-	uart_barrier(bas);
 
 	return (0);
 }
@@ -171,14 +173,13 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 
 	rxstale = 31;
 	tmp = UART_DM_IPR_STALE_TIMEOUT_LSB_MASK & rxstale;
-	tmp |= UART_DM_IPR_STALE_LAST;
 	tmp |= UART_DM_IPR_STALE_TIMEOUT_MSB_MASK & (rxstale << 2);
 	WR4(bas, UART_DM_IPR, tmp);
 
 
 	/* Configure Interrupt Programming Register */
 	/* Set initial Stale timeout value */
-	WR4(bas, UART_DM_IPR, UART_DM_STALE_TIMEOUT_LSB);
+	WR4(bas, UART_DM_IPR, UART_DM_IPR_STALE_TIMEOUT_LSB);
 
 	/* Disable IRDA mode */
 	WR4(bas, UART_DM_IRDA, 0x0);
@@ -191,16 +192,23 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 	/* Issue soft reset command */
 	WR4(bas, UART_DM_CR, UART_DM_CR_PROTECTION_EN);
 
+	/* Disable and reset RX/TX */
 	WR4(bas, UART_DM_CR, UART_DM_CR_TX_DISABLE);
 	WR4(bas, UART_DM_CR, UART_DM_CR_RX_DISABLE);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_TX);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_RX);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_ERROR_STATUS);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_BREAK_INT);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_TX);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RX);
 
-	/* Enable/Disable Rx/Tx DM interfaces */
-	/* Disable Data Mover for now. */
+	/* Clear all interrupts */
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RXBREAK_START);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RXBREAK_END);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_BREAK_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_CTS);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_PAR_FRAME_ERR);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_ERROR_STATUS);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_TX_DONE);
+
+	/* Disable Data Mover */
 	WR4(bas, UART_DM_DMEN, 0x0);
 
 	/* Set default parameters */
@@ -211,9 +219,9 @@ msm_uart_init(struct uart_bas *bas, int baudrate, int databits, int stopbits,
 	WR4(bas, UART_DM_CR, UART_DM_CR_TX_ENABLE);
 
 	/* Clear stale status */
-	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
 	WR4(bas, UART_DM_DMRX, 0xFFFFFF);
-	WR4(bas, UART_DM_CR, UART_DM_STALE_EVENT_ENABLE);
+	WR4(bas, UART_DM_CR, UART_DM_CR_STALE_EVENT_ENABLE);
 }
 
 static void
@@ -268,17 +276,9 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 		uart_unlock(mtx);
 		return (c);
 	}
-
 	/* Whole word is in FIFO */
 	if (RD4(bas, UART_DM_SR) & UART_DM_SR_RXRDY) {
 		/* Read buffer */
-		sc->readbuf = RD4(bas, UART_DM_RF(0));
-		c = (sc->readbuf & 0xFF);
-		sc->readbuf >>= 8;
-		sc->readcnt--;
-
-		uart_unlock(mtx);
-		return (c);
 		sc->readbuf = RD4(bas, UART_DM_RF(0));
 		c = (sc->readbuf & 0xFF );
 		sc->readcnt = 4;
@@ -294,15 +294,15 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 	} while (sc->readcnt == 0);
 
 	/* Force stale event */
-	WR4(bas, UART_DM_CR, UART_DM_FORCE_STALE_EVENT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_FORCE_STALE_EVENT);
 	/* Read buffer */
 	sc->readbuf = RD4(bas, UART_DM_RF(0));
 	c = (sc->readbuf & 0xFF);
 	sc->readbuf >>= 8;
 	sc->readcnt--;
-	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
 	WR4(bas, UART_DM_DMRX, 0xFFFFFF);
-	WR4(bas, UART_DM_CR, UART_DM_STALE_EVENT_ENABLE);
+	WR4(bas, UART_DM_CR, UART_DM_CR_STALE_EVENT_ENABLE);
 
 	uart_unlock(mtx);
 	return (c);
@@ -361,18 +361,18 @@ msm_uart_bus_transmit(struct uart_softc *sc)
 
 	uart_lock(sc->sc_hwmtx);
 
+	/* Clear  TX Ready */
+	WR4(bas, UART_DM_CR, UART_DM_CR_CLEAR_TX_READY);
 	/* Write some data */
 	for (i = 0; i < sc->sc_txdatasz; i++) {
 		/* Write TX data */
 		msm_uart_putc(bas, sc->sc_txbuf[i]);
-		uart_barrier(bas);
 	}
 
 	/* TX FIFO is empty now, enable TX_READY interrupt */
-	u->ier |= UART_DM_TX_READY;
+	u->ier |= UART_DM_IMR_TX_READY;
 	WR4(bas, UART_DM_IMR, u->ier);
-	uart_barrier(bas);
-
+	RD4(bas, UART_DM_IMR);
 	/*
 	 * Inform upper layer that it is transmitting data to hardware,
 	 * this will be cleared when TXIDLE interrupt occurs.
@@ -390,35 +390,60 @@ msm_uart_bus_setsig(struct uart_softc *sc, int sig)
 	return (0);
 }
 
-/* XXX This not works  now.... */
 static int
 msm_uart_bus_receive(struct uart_softc *sc)
 {
 	struct msm_uart_softc *u = (struct msm_uart_softc *)sc;
 	struct uart_bas *bas;
-	int c;
+	int c, i, chars;
+	uint32_t isr;
 
 	bas = &sc->sc_bas;
 	uart_lock(sc->sc_hwmtx);
-
-	/* Initialize Receive Path and interrupt */
-	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
-	WR4(bas, UART_DM_CR, UART_DM_STALE_EVENT_ENABLE);
-	u->ier |= UART_DM_RXLEV;
-	WR4(bas, UART_DM_IMR, u->ier);
-
-	/* Loop over until we are full, or no data is available */
-	while (RD4(bas, UART_DM_SR) & UART_DM_SR_RXRDY) {
-		if (uart_rx_full(sc)) {
-			/* No space left in input buffer */
+	/* Check for HW overrun first */
+	if (RD4(bas, UART_DM_SR) & UART_DM_SR_UART_OVERRUN) {
+		if (uart_rx_full(sc))
 			sc->sc_rxbuf[sc->sc_rxput] = UART_STAT_OVERRUN;
+		else
+			uart_rx_put(sc, UART_STAT_OVERRUN);
+		WR4(bas, UART_DM_CR, UART_DM_CR_RESET_ERROR_STATUS);
+	}
+
+	isr = RD4(bas, UART_DM_ISR);
+
+	/* Force stale event */
+	if ((isr & UART_DM_IMR_RXSTALE) == 0)
+		 WR4(bas, UART_DM_CR, UART_DM_CR_FORCE_STALE_EVENT);
+
+	/* Get number of charactes in RX FIFO */
+	chars = RD4(bas, UART_DM_RX_TOTAL_SNAP);
+
+	/* read all characters in FIFO - remember, FIFO si 32-bits wide */
+	while (chars > 0) {
+		if (!(RD4(bas, UART_DM_SR) & UART_DM_SR_RXRDY)) {
+			/* something is bad, RX FIFO is empty */
 			break;
 		}
-
-		/* Read RX FIFO */
+		i = min(chars, 4);
 		c = RD4(bas, UART_DM_RF(0));
-		uart_rx_put(sc, c);
+		while ( i > 0) {
+			if (uart_rx_full(sc))
+				sc->sc_rxbuf[sc->sc_rxput] |= UART_STAT_OVERRUN;
+			else
+				uart_rx_put(sc,  c & 0xFF);
+			c >>= 8;
+			i--;
+			chars--;
+		}
 	}
+
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
+	WR4(bas, UART_DM_DMRX, 0xFFFFFF);
+	WR4(bas, UART_DM_CR, UART_DM_CR_STALE_EVENT_ENABLE);
+
+	u->ier |= UART_DM_IMR_RXLEV | UART_DM_IMR_RXSTALE;
+	WR4(bas, UART_DM_IMR, u->ier);
+	RD4(bas, UART_DM_IMR);
 
 	uart_unlock(sc->sc_hwmtx);
 
@@ -454,47 +479,31 @@ msm_uart_bus_ipend(struct uart_softc *sc)
 
 	ipend = 0;
 
+	if (isr & UART_DM_IMR_RXBREAK_START) {
+		WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RXBREAK_START);
+		WR4(bas, UART_DM_CR, UART_DM_CR_RESET_BREAK_INT);
+		ipend |= SER_INT_BREAK;
+	}
+
 	/* Uart RX starting, notify upper layer */
-	if (isr & UART_DM_RXLEV) {
-		u->ier &= ~UART_DM_RXLEV;
+	if (isr & (UART_DM_IMR_RXLEV | UART_DM_IMR_RXSTALE)) {
+		u->ier &= ~(UART_DM_IMR_RXLEV| UART_DM_IMR_RXSTALE);
 		WR4(bas, UART_DM_IMR, u->ier);
-		uart_barrier(bas);
 		ipend |= SER_INT_RXREADY;
 	}
 
-	/* Stale RX interrupt */
-	if (isr & UART_DM_RXSTALE) {
-		/* Disable and reset it */
-		WR4(bas, UART_DM_CR, UART_DM_STALE_EVENT_DISABLE);
-		WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
-		uart_barrier(bas);
-		ipend |= SER_INT_RXREADY;
-	}
 
 	/* TX READY interrupt */
-	if (isr & UART_DM_TX_READY) {
-		/* Clear  TX Ready */
-		WR4(bas, UART_DM_CR, UART_DM_CLEAR_TX_READY);
-
+	if (isr & UART_DM_IMR_TX_READY) {
 		/* Disable TX_READY */
-		u->ier &= ~UART_DM_TX_READY;
+		u->ier &= ~UART_DM_IMR_TX_READY;
 		WR4(bas, UART_DM_IMR, u->ier);
-		uart_barrier(bas);
 
 		if (sc->sc_txbusy != 0)
 			ipend |= SER_INT_TXIDLE;
 	}
 
-	if (isr & UART_DM_TXLEV) {
-		/* TX FIFO is empty */
-		u->ier &= ~UART_DM_TXLEV;
-		WR4(bas, UART_DM_IMR, u->ier);
-		uart_barrier(bas);
-
-		if (sc->sc_txbusy != 0)
-			ipend |= SER_INT_TXIDLE;
-	}
-
+	RD4(bas, UART_DM_IMR);
 	uart_unlock(sc->sc_hwmtx);
 	return (ipend);
 }
@@ -525,15 +534,14 @@ msm_uart_bus_grab(struct uart_softc *sc)
 {
 	struct uart_bas *bas = &sc->sc_bas;
 
-	/* XXX: fix needed */
 	/*
 	 * Turn off all interrupts to enter polling mode. Leave the
 	 * saved mask alone. We'll restore whatever it was in ungrab.
 	 */
 	uart_lock(sc->sc_hwmtx);
-	WR4(bas, UART_DM_CR, UART_DM_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
 	WR4(bas, UART_DM_IMR, 0);
-	uart_barrier(bas);
+	RD4(bas, UART_DM_IMR);
 	uart_unlock(sc->sc_hwmtx);
 }
 
@@ -543,12 +551,26 @@ msm_uart_bus_ungrab(struct uart_softc *sc)
 	struct msm_uart_softc *u = (struct msm_uart_softc *)sc;
 	struct uart_bas *bas = &sc->sc_bas;
 
-	/*
-	 * Restore previous interrupt mask
-	 */
+	/* Reset receiver */
 	uart_lock(sc->sc_hwmtx);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RX_DISABLE);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RX);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RXBREAK_START);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_RXBREAK_END);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_BREAK_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_CTS);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_PAR_FRAME_ERR);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_ERROR_STATUS);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RESET_STALE_INT);
+	WR4(bas, UART_DM_CR, UART_DM_CR_RX_ENABLE);
+
+	WR4(bas, UART_DM_DMRX, 0xFFFFFF);
+	WR4(bas, UART_DM_CR, UART_DM_CR_STALE_EVENT_ENABLE);
+
+	/* Restore previous interrupt mask */
+	u->ier |= UART_DM_IMR_RXLEV | UART_DM_IMR_RXSTALE;
 	WR4(bas, UART_DM_IMR, u->ier);
-	uart_barrier(bas);
+	RD4(bas, UART_DM_IMR);
 	uart_unlock(sc->sc_hwmtx);
 }
 
@@ -658,8 +680,6 @@ msm_uart_dev_attach(device_t dev)
 		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
 		goto fail;
 	}
-device_printf(dev, "got UART clock: %lld\n", freq);
-
 	return (uart_bus_attach(dev));
 
 fail:
