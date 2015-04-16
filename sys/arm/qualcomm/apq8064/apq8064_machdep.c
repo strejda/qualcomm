@@ -107,43 +107,28 @@ apq8064_devmap_init(platform_t plat)
 	return (0);
 }
 
-#define PMC_PHYSBASE		0x7000e400
-#define PMC_SIZE		0x400
-#define PMC_CONTROL_REG		0x0
-#define PMC_SCRATCH0		0x50
+#define TMR0_PHYSBASE		0x0200A000
+#define TMR0_SIZE		1024
+#define  WDT0_RST		0x0038
+#define  WDT0_EN		0x0040
+#define  WDT0_BARK_TIME		0x004C
+#define  WDT0_BITE_TIME		0x005C
 
 void
 cpu_reset(void)
 {
-//	bus_space_handle_t pmc;
-//	uint32_t reg;
+	bus_space_handle_t tmr0;
 
 	printf("Resetting...\n");
-//	bus_space_map(fdtbus_bs_tag, PMC_PHYSBASE, PMC_SIZE, 0, &pmc);
-
-//	reg = bus_space_read_4(fdtbus_bs_tag, pmc, PMC_SCRATCH0);
-//	bus_space_write_4(fdtbus_bs_tag, pmc, PMC_SCRATCH0,
-//	   (reg & ~0xc0000002) | 0x40000000); /* boot to bootloader */
-//	 bus_space_write_4(fdtbus_bs_tag, pmc, PMC_SCRATCH0,
-//	    (reg & ~0xc0000002) | 0x00000002); /* boot to rcm */
-
-//	reg = bus_space_read_4(fdtbus_bs_tag, pmc, PMC_CONTROL_REG);
-//	bus_space_write_4(fdtbus_bs_tag, pmc, PMC_CONTROL_REG, reg | 0x10);
+	bus_space_map(fdtbus_bs_tag, TMR0_PHYSBASE, TMR0_SIZE, 0, &tmr0);
+	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_RST, 1);
+	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_BARK_TIME, 5*0x31F3);
+	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_BITE_TIME, 0x31F3);
+	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_EN, 1);
 
 	while(1)
 		;
-	
 }
-/*
-void
-DELAY(int usec)
-{
-	int i;
-	
-	for (i = 0; i < (usec * 1000); i++)
-	    __asm __volatile ("nop");
-}
-*/
 
 /*
  * Early putc routine for EARLY_PRINTF support.  To use, add to kernel config:
