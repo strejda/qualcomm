@@ -1414,6 +1414,8 @@ dev/fb/splash.c			optional sc splash
 dev/fdt/fdt_clock.c		optional fdt fdt_clock
 dev/fdt/fdt_clock_if.m		optional fdt fdt_clock
 dev/fdt/fdt_common.c		optional fdt
+dev/fdt/fdt_phy.c		optional fdt fdt_phy
+dev/fdt/fdt_phy_if.m		optional fdt fdt_phy
 dev/fdt/fdt_pinctrl.c		optional fdt fdt_pinctrl
 dev/fdt/fdt_pinctrl_if.m	optional fdt fdt_pinctrl
 dev/fdt/fdt_reset.c		optional fdt fdt_reset
@@ -1550,10 +1552,10 @@ ipw_monitor.fw			optional ipwmonitorfw | ipwfw		\
 	compile-with	"${NORMAL_FW}"					\
 	no-obj no-implicit-rule						\
 	clean		"ipw_monitor.fw"
-dev/iscsi/icl.c			optional iscsi | ctl 
-dev/iscsi/icl_conn_if.m		optional iscsi | ctl 
+dev/iscsi/icl.c			optional iscsi | ctl
+dev/iscsi/icl_conn_if.m		optional iscsi | ctl
 dev/iscsi/icl_proxy.c		optional iscsi | ctl
-dev/iscsi/icl_soft.c		optional iscsi | ctl 
+dev/iscsi/icl_soft.c		optional iscsi | ctl
 dev/iscsi/iscsi.c		optional iscsi scbus
 dev/iscsi_initiator/iscsi.c	optional iscsi_initiator scbus
 dev/iscsi_initiator/iscsi_subr.c	optional iscsi_initiator scbus
