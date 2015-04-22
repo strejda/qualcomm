@@ -58,6 +58,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/intr.h>
 #include <machine/smp.h>
+#include <machine/cpu-v6.h>
 
 #include <dev/fdt/fdt_common.h>
 #include <dev/ofw/openfirm.h>
@@ -135,6 +136,7 @@ struct arm_gic_softc {
 	uint8_t			ver;
 	struct mtx		mutex;
 	uint32_t		nirqs;
+	int			gic_type;
 };
 
 static struct resource_spec arm_gic_spec[] = {
@@ -165,16 +167,19 @@ static int gic_config_irq(int irq, enum intr_trigger trig,
 static void gic_post_filter(void *);
 #endif
 
+#define GIC_TYPE_ARM		1
+#define GIC_TYPE_BRCM		2
+#define GIC_TYPE_QCOM		3
 static struct ofw_compat_data compat_data[] = {
-	{"arm,gic",		true},	/* Non-standard, used in FreeBSD dts. */
-	{"arm,gic-400",		true},
-	{"arm,cortex-a15-gic",	true},
-	{"arm,cortex-a9-gic",	true},
-	{"arm,cortex-a7-gic",	true},
-	{"arm,arm11mp-gic",	true},
-	{"brcm,brahma-b15-gic",	true},
-	{"qcom,msm-qgic2",	true},
-	{NULL,			false}
+	{"arm,gic",		GIC_TYPE_ARM},	/* Non-standard, used in FreeBSD dts. */
+	{"arm,gic-400",		GIC_TYPE_ARM},
+	{"arm,cortex-a15-gic",	GIC_TYPE_ARM},
+	{"arm,cortex-a9-gic",	GIC_TYPE_ARM},
+	{"arm,cortex-a7-gic",	GIC_TYPE_ARM},
+	{"arm,arm11mp-gic",	GIC_TYPE_ARM},
+	{"brcm,brahma-b15-gic",	GIC_TYPE_BRCM},
+	{"qcom,msm-qgic2",	GIC_TYPE_QCOM},
+	{NULL,			0}
 };
 
 static int
@@ -280,15 +285,18 @@ arm_gic_init_secondary(device_t dev)
 	gic_d_write_4(sc, GICD_CTLR, 0x01);
 
 	/*
+	 * XXXX !!!!! This is ugly hack !!!!
 	 * Activate the timer interrupts: virtual, secure, and non-secure.
 	 */
-	gic_d_write_4(sc, GICD_ISENABLER(27 >> 5), (1UL << (27 & 0x1F)));
-	gic_d_write_4(sc, GICD_ISENABLER(29 >> 5), (1UL << (29 & 0x1F)));
-	gic_d_write_4(sc, GICD_ISENABLER(30 >> 5), (1UL << (30 & 0x1F)));
+	if (sc->gic_type != GIC_TYPE_QCOM) {
+		gic_d_write_4(sc, GICD_ISENABLER(27 >> 5), 1UL << (27 & 0x1F));
+		gic_d_write_4(sc, GICD_ISENABLER(29 >> 5), 1UL << (29 & 0x1F));
+		gic_d_write_4(sc, GICD_ISENABLER(30 >> 5), 1UL << (30 & 0x1F));
+	}
 }
 #endif /* ARM_INTRNG */
 #endif /* SMP */
- 
+
 #ifndef ARM_INTRNG
 int
 gic_decode_fdt(phandle_t iparent, pcell_t *intr, int *interrupt,
@@ -370,11 +378,17 @@ arm_gic_attach(device_t dev)
 #ifdef ARM_INTRNG
 	intptr_t	xref = gic_xref(dev);
 #endif
+	const struct ofw_compat_data *cd;
 
 	if (gic_sc)
 		return (ENXIO);
 
 	sc = device_get_softc(dev);
+
+	cd = ofw_bus_search_compatible(dev, compat_data);
+	if (cd->ocd_data == 0)
+		panic("arm_gic_attach called for not-compatible device");
+	sc->gic_type = cd->ocd_data;
 
 	if (bus_alloc_resources(dev, arm_gic_spec, sc->gic_res)) {
 		device_printf(dev, "could not allocate resources\n");
@@ -913,10 +927,10 @@ arm_gic_next_irq(struct arm_gic_softc *sc, int last_irq)
 	if (active_irq == 0x3FF) {
 		if (last_irq == -1)
 			printf("Spurious interrupt detected\n");
-		return -1;
+		return (-1);
 	}
 
-	return active_irq;
+	return (active_irq);
 }
 
 static int
