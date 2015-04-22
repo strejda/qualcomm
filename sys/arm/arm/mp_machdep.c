@@ -232,6 +232,8 @@ init_secondary(int cpu)
 #endif /* INTRNG */
 	enable_interrupts(PSR_I);
 
+	platform_mp_init_secondary();
+
 	loop_counter = 0;
 	while (smp_started == 0) {
 		DELAY(100);
@@ -239,13 +241,12 @@ init_secondary(int cpu)
 		if (loop_counter == 1000)
 			CTR0(KTR_SMP, "AP still wait for smp_started");
 	}
+
 	/* Start per-CPU event timers. */
 	cpu_initclocks_ap();
 
-	CTR0(KTR_SMP, "go into scheduler");
-	platform_mp_init_secondary();
-
 	/* Enter the scheduler */
+	CTR0(KTR_SMP, "go into scheduler");
 	sched_throw(NULL);
 
 	panic("scheduler returned us to %s", __func__);
@@ -460,15 +461,10 @@ release_aps(void *dummy __unused)
 #endif
 #endif
 
+	/*
+	 * Register IPI handlers. Use IPI number as arguument for it
+	 */
 	for (int i = start; i <= end; i++) {
-		/*
-		 * IPI handler
-		 */
-		/*
-		 * Use 0xdeadbeef as the argument value for irq 0,
-		 * if we used 0, the intr code will give the trap frame
-		 * pointer instead.
-		 */
 		arm_setup_irqhandler("ipi", ipi_handler, NULL, (void *)i, i,
 		    INTR_TYPE_MISC | INTR_EXCL, NULL);
 
