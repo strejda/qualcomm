@@ -13,10 +13,14 @@ arm/arm/bus_space_base.c		standard
 #
 # Standard SOC devices and support.
 #
-arm/qualcomm/apq8064/apq8064_machdep.c	standard
 arm/qualcomm/msm_uart.c			standard
 arm/qualcomm/mmci.c			standard
 arm/qualcomm/qcom_gsbi.c		standard
+arm/qualcomm/qcom_scm.c			optional	smp
+arm/qualcomm/qcom_scm_asm.S		optional	smp
+arm/qualcomm/apq8064/apq8064_machdep.c	standard
+arm/qualcomm/apq8064/apq8064_mp.c	optional	smp
+arm/qualcomm/apq8064/apq8064_timer.c	standard
 arm/qualcomm/apq8064/apq8064_clk_pll.c	standard
 arm/qualcomm/apq8064/apq8064_clk_rcg.c	standard
 arm/qualcomm/apq8064/apq8064_clk_br.c	standard
@@ -31,5 +35,4 @@ arm/qualcomm/apq8064/apq8064_pinctrl.c	standard
 #
 # Optional devices.
 #
-arm/qualcomm/apq8064/timer.c		standard
 

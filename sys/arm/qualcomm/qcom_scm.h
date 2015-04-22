@@ -25,9 +25,21 @@
  *
  * $FreeBSD$
  */
+#ifndef _QCOM_SCM_H_
 
-#ifndef _APQ8084_MACHDEP_H_
+/*
+ * Qualcom Secure Channel Manager
+ */
 
-void arm_init_secondary_timer(void);
+/* Errors from SCM calls */
+#define SCM_ENOMEM			-5
+#define SCM_EOPNOTSUPP			-4
+#define SCM_EINVAL_ADDR			-3
+#define SCM_EINVAL_ARG			-2
+#define SCM_ERROR			-1
 
-#endif /* _APQ8084_MACHDEP_H_ */
+
+/* Set startup address for cold boot */
+int scm_cold_boot_addr(uint32_t addr, int cpu);
+
+#endif /* _QCOM_SCM_H_ */
