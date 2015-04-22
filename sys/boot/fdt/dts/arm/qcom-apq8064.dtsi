@@ -1,8 +1,11 @@
 /dts-v1/;
 
 #include "skeleton.dtsi"
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/clock/qcom,gcc-msm8960.h>
+#include <dt-bindings/reset/qcom,gcc-msm8960.h>
 #include <dt-bindings/clock/qcom,mmcc-msm8960.h>
+#include <dt-bindings/mfd/qcom-rpm.h>
 #include <dt-bindings/soc/qcom,gsbi.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
@@ -11,22 +14,6 @@
 	compatible = "qcom,apq8064";
 	interrupt-parent = <&intc>;
 
-	memory {
-		device_type = "memory";
-		reg = < 0x80000000 0x40000000 >; /* XXX: 1GB RAM for now */
-	};
-
-	chosen {
-		bootargs = "-v";
-		stdin = "uart0";
-		stdout = "uart0";
-	};
-	
-	aliases {
-		soc = &soc;
-		uart0 = &uart0;
-	};
-	
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -108,10 +95,38 @@
 				};
 			};
 
+			hdmi_pinctrl: hdmi-pinctrl {
+				mux1 {
+					pins = "gpio69", "gpio70", "gpio71";
+					function = "hdmi";
+					bias-pull-up;
+					drive-strength = <2>;
+				};
+				mux2 {
+					pins = "gpio72";
+					function = "hdmi";
+					bias-pull-down;
+					drive-strength = <16>;
+				};
+			};
 			ps_hold: ps_hold {
 				mux {
 					pins = "gpio78";
 					function = "ps_hold";
+				};
+			};
+
+			i2c1_pins: i2c1 {
+				mux {
+					pins = "gpio20", "gpio21";
+					function = "gsbi1";
+				};
+			};
+
+			i2c3_pins: i2c3 {
+				mux {
+					pins = "gpio8", "gpio9";
+					function = "gsbi3";
 				};
 			};
 		};
@@ -200,24 +215,22 @@
 			};
 		};
 
-		gsbi2: gsbi@12480000 {
+		gsbi3: gsbi@16200000 {
 			status = "disabled";
 			compatible = "qcom,gsbi-v1.0.0";
-			reg = <0x12480000 0x100>;
-			clocks = <&gcc GSBI2_H_CLK>;
+			reg = <0x16200000 0x100>;
+			clocks = <&gcc GSBI3_H_CLK>;
 			clock-names = "iface";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
 
-			i2c2: i2c@124a0000 {
+			i2c3: i2c@16280000 {
 				compatible = "qcom,i2c-qup-v1.1.1";
-				reg = <0x124a0000 0x1000>;
-				interrupts = <0 196 IRQ_TYPE_NONE>;
-				clocks = <&gcc GSBI2_QUP_CLK>, <&gcc GSBI2_H_CLK>;
+				reg = <0x16280000 0x1000>;
+				interrupts = <0 151 IRQ_TYPE_NONE>;
+				clocks = <&gcc GSBI3_QUP_CLK>, <&gcc GSBI3_H_CLK>;
 				clock-names = "core", "iface";
-				#address-cells = <1>;
-				#size-cells = <0>;
 			};
 		};
 
@@ -230,7 +243,8 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
-			 serial@16640000 {
+
+			serial0: serial@16640000 {
 				compatible = "qcom,msm-uartdm-v1.3", "qcom,msm-uartdm";
 				reg = <0x16640000 0x1000>,
 				      <0x16600000 0x1000>;
@@ -239,6 +253,18 @@
 				clock-names = "core", "iface";
 				status = "disabled";
 			};
+		};
+
+		ext_3p3v: regulator-fixed@1 {
+			compatible = "regulator-fixed";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-name = "ext_3p3v";
+			regulator-type = "voltage";
+			startup-delay-us = <0>;
+			gpio = <&tlmm_pinmux 77 GPIO_ACTIVE_HIGH>;
+			enable-active-high;
+			regulator-boot-on;
 		};
 
 		qcom,ssbi@500000 {
@@ -259,6 +285,366 @@
 			reg = <0x4000000 0x1000>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
+		};
+
+		l2cc: clock-controller@2011000 {
+			compatible	= "syscon";
+			reg		= <0x2011000 0x1000>;
+		};
+
+		rpm@108000 {
+			compatible	= "qcom,rpm-apq8064";
+			reg		= <0x108000 0x1000>;
+			qcom,ipc	= <&l2cc 0x8 2>;
+
+			interrupts	= <0 19 0>, <0 21 0>, <0 22 0>;
+			interrupt-names	= "ack", "err", "wakeup";
+
+			#address-cells	= <1>;
+			#size-cells	= <0>;
+
+			/* Buck SMPS */
+			pm8921_s1: pm8921-s1 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS1>;
+			};
+
+			pm8921_s2: pm8921-s2 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS2>;
+			};
+
+			pm8921_s3: pm8921-s3 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS3>;
+			};
+
+			pm8921_s4: pm8921-s4 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS4>;
+			};
+
+			pm8921_s5: pm8921-s5 {
+				compatible	= "qcom,rpm-pm8921-ftsmps";
+				reg		= <QCOM_RPM_PM8921_SMPS5>;
+			};
+
+			pm8921_s6: pm8921-s6 {
+				compatible	= "qcom,rpm-pm8921-ftsmps";
+				reg		= <QCOM_RPM_PM8921_SMPS6>;
+			};
+
+			pm8921_s7: pm8921-s7 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS7>;
+			};
+
+			pm8921_s8: pm8921-s8 {
+				compatible	= "qcom,rpm-pm8921-smps";
+				reg		= <QCOM_RPM_PM8921_SMPS8>;
+			};
+
+			/* PMOS LDO */
+			pm8921_l1: pm8921-l1 {
+				compatible	= "qcom,rpm-pm8921-nldo";
+				reg		= <QCOM_RPM_PM8921_LDO1>;
+			};
+
+			pm8921_l2: pm8921-l2 {
+				compatible	= "qcom,rpm-pm8921-nldo";
+				reg		= <QCOM_RPM_PM8921_LDO2>;
+			};
+
+			pm8921_l3: pm8921-l3 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO3>;
+			};
+
+			pm8921_l4: pm8921-l4 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO4>;
+			};
+
+			pm8921_l5: pm8921-l5 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO5>;
+			};
+
+			pm8921_l6: pm8921-l6 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO6>;
+			};
+
+			pm8921_l7: pm8921-l7 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO7>;
+			};
+
+			pm8921_l8: pm8921-l8 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO8>;
+			};
+
+			pm8921_l9: pm8921-l9 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO9>;
+			};
+
+			pm8921_l10: pm8921-l10 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO10>;
+			};
+
+			pm8921_l11: pm8921-l11 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO11>;
+			};
+
+			pm8921_l12: pm8921-l12 {
+				compatible	= "qcom,rpm-pm8921-nldo";
+				reg		= <QCOM_RPM_PM8921_LDO12>;
+			};
+
+			pm8921_l14: pm8921-l14 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO14>;
+			};
+
+			pm8921_l15: pm8921-l15 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO15>;
+			};
+
+			pm8921_l16: pm8921-l16 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO16>;
+			};
+
+			pm8921_l17: pm8921-l17 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO17>;
+			};
+
+			pm8921_l18: pm8921-l18 {
+				compatible	= "qcom,rpm-pm8921-nldo";
+				reg		= <QCOM_RPM_PM8921_LDO18>;
+			};
+
+			pm8921_l21: pm8921-l21 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO21>;
+			};
+
+			pm8921_l22: pm8921-l22 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO22>;
+			};
+
+			pm8921_l23: pm8921-l23 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO23>;
+			};
+
+			pm8921_l24: pm8921-l24 {
+				compatible	= "qcom,rpm-pm8921-nldo1200";
+				reg		= <QCOM_RPM_PM8921_LDO24>;
+			};
+
+			pm8921_l25: pm8921-l25 {
+				compatible	= "qcom,rpm-pm8921-nldo1200";
+				reg		= <QCOM_RPM_PM8921_LDO25>;
+			};
+
+			pm8921_l26: pm8921-l26 {
+				compatible	= "qcom,rpm-pm8921-nldo1200";
+				reg		= <QCOM_RPM_PM8921_LDO26>;
+			};
+
+			pm8921_l27: pm8921-l27 {
+				compatible	= "qcom,rpm-pm8921-nldo1200";
+				reg		= <QCOM_RPM_PM8921_LDO27>;
+			};
+
+			pm8921_hdmi_mvs: pm8921-hdmi-mvs {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_HDMI_SWITCH>;
+				regulator-always-on;
+				bias-pull-down;
+			};
+
+			pm8921_l28: pm8921-l28 {
+				compatible	= "qcom,rpm-pm8921-nldo1200";
+				reg		= <QCOM_RPM_PM8921_LDO28>;
+			};
+
+			pm8921_l29: pm8921-l29 {
+				compatible	= "qcom,rpm-pm8921-pldo";
+				reg		= <QCOM_RPM_PM8921_LDO29>;
+			};
+
+			/* Low Voltage Switch */
+			pm8921_lvs1: pm8921-lvs1 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS1>;
+			};
+
+			pm8921_lvs2: pm8921-lvs2 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS2>;
+			};
+
+			pm8921_lvs3: pm8921-lvs3 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS3>;
+			};
+
+			pm8921_lvs4: pm8921-lvs4 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS4>;
+			};
+
+			pm8921_lvs5: pm8921-lvs5 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS5>;
+			};
+
+			pm8921_lvs6: pm8921-lvs6 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS6>;
+			};
+
+			pm8921_lvs7: pm8921-lvs7 {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_PM8921_LVS7>;
+			};
+
+			pm8921_usb_switch: pm8921-usb-switch {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_USB_OTG_SWITCH>;
+			};
+
+			pm8921_hdmi_switch: pm8921-hdmi-switch {
+				compatible	= "qcom,rpm-pm8921-switch";
+				reg		= <QCOM_RPM_HDMI_SWITCH>;
+			};
+
+			pm8921_ncp: pm8921-ncp {
+				compatible	= "qcom,rpm-pm8921-ncp";
+				reg		= <QCOM_RPM_PM8921_NCP>;
+			};
+		};
+
+		usb1_phy: phy@12500000 {
+			compatible	= "qcom,usb-otg-ci";
+			reg		= <0x12500000 0x400>;
+			interrupts	= <0 100 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			dr_mode		= "host";
+
+			clocks		= <&gcc USB_HS1_XCVR_CLK>,
+					  <&gcc USB_HS1_H_CLK>;
+			clock-names	= "core", "iface";
+
+			resets		= <&gcc USB_HS1_RESET>;
+			reset-names	= "link";
+		};
+
+		usb3_phy: phy@12520000 {
+			compatible	= "qcom,usb-otg-ci";
+			reg		= <0x12520000 0x400>;
+			interrupts	= <0 188 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			dr_mode		= "host";
+
+			clocks		= <&gcc USB_HS3_XCVR_CLK>,
+					  <&gcc USB_HS3_H_CLK>;
+			clock-names	= "core", "iface";
+
+			resets		= <&gcc USB_HS3_RESET>;
+			reset-names	= "link";
+		};
+
+		usb4_phy: phy@12530000 {
+			compatible	= "qcom,usb-otg-ci";
+			reg		= <0x12530000 0x400>;
+			interrupts	= <0 215 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			dr_mode		= "host";
+
+			clocks		= <&gcc USB_HS4_XCVR_CLK>,
+					  <&gcc USB_HS4_H_CLK>;
+			clock-names	= "core", "iface";
+
+			resets		= <&gcc USB_HS4_RESET>;
+			reset-names	= "link";
+		};
+
+		gadget1: gadget@12500000 {
+			compatible	= "qcom,ci-hdrc";
+			reg		= <0x12500000 0x400>;
+			status		= "disabled";
+			dr_mode		= "peripheral";
+			interrupts	= <0 100 IRQ_TYPE_NONE>;
+			usb-phy		= <&usb1_phy>;
+		};
+
+		usb1: usb@12500000 {
+			compatible	= "qcom,ehci-host";
+			reg		= <0x12500000 0x400>;
+			interrupts	= <0 100 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			usb-phy		= <&usb1_phy>;
+		};
+
+		usb3: usb@12520000 {
+			compatible	= "qcom,ehci-host";
+			reg		= <0x12520000 0x400>;
+			interrupts	= <0 188 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			usb-phy		= <&usb3_phy>;
+		};
+
+		usb4: usb@12530000 {
+			compatible	= "qcom,ehci-host";
+			reg		= <0x12530000 0x400>;
+			interrupts	= <0 215 IRQ_TYPE_NONE>;
+			status		= "disabled";
+			usb-phy		= <&usb4_phy>;
+		};
+
+		sata_phy0: sata-phy@1b400000{
+			compatible	= "qcom,apq8064-sata-phy";
+			status		= "disabled";
+			reg		= <0x1b400000 0x200>;
+			reg-names	= "phy_mem";
+			clocks		= <&gcc SATA_PHY_CFG_CLK>;
+			clock-names	= "cfg";
+			#phy-cells	= <0>;
+		};
+
+		sata0: sata@29000000 {
+			compatible		= "generic-ahci";
+			status			= "disabled";
+			reg			= <0x29000000 0x180>;
+			interrupts		= <0 209 0>;
+
+			clocks			= <&gcc SFAB_SATA_S_H_CLK>,
+						<&gcc SATA_H_CLK>,
+						<&gcc SATA_A_CLK>,
+						<&gcc SATA_RXOOB_CLK>,
+						<&gcc SATA_PMALIVE_CLK>;
+			clock-names		= "slave_iface",
+						"iface",
+						"bus",
+						"rxoob",
+						"core_pmalive";
+
+			assigned-clocks		= <&gcc SATA_RXOOB_CLK>,
+						<&gcc SATA_PMALIVE_CLK>;
+			assigned-clock-rates	= <100000000>, <100000000>;
+
+			phys			= <&sata_phy0>;
+			phy-names		= "sata-phy";
 		};
 
 		/* Temporary fixed regulator */
@@ -305,7 +691,6 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
-
 			sdcc1: sdcc@12400000 {
 				status		= "disabled";
 				compatible	= "arm,pl18x", "arm,primecell";
@@ -364,8 +749,84 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&sdc4_gpios>;
 			};
-
 		};
 
+		hdmi: qcom,hdmi-tx@4a00000 {
+			compatible = "qcom,hdmi-tx-8960";
+			reg-names = "core_physical";
+			reg = <0x04a00000 0x1000>;
+			interrupts = <GIC_SPI 79 0>;
+			clock-names =
+			    "core_clk",
+			    "master_iface_clk",
+			    "slave_iface_clk";
+			clocks =
+			    <&mmcc HDMI_APP_CLK>,
+			    <&mmcc HDMI_M_AHB_CLK>,
+			    <&mmcc HDMI_S_AHB_CLK>;
+			qcom,hdmi-tx-ddc-clk = <&tlmm_pinmux 70
+						GPIO_ACTIVE_HIGH>;
+			qcom,hdmi-tx-ddc-data = <&tlmm_pinmux 71
+						GPIO_ACTIVE_HIGH>;
+			qcom,hdmi-tx-hpd = <&tlmm_pinmux 72
+						GPIO_ACTIVE_HIGH>;
+			core-vdda-supply = <&pm8921_hdmi_mvs>;
+			hdmi-mux-supply = <&ext_3p3v>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&hdmi_pinctrl>;
+		};
+
+		gpu: qcom,adreno-3xx@4300000 {
+			compatible = "qcom,adreno-3xx";
+			reg = <0x04300000 0x20000>;
+			reg-names = "kgsl_3d0_reg_memory";
+			interrupts = <GIC_SPI 80 0>;
+			interrupt-names = "kgsl_3d0_irq";
+			clock-names =
+			    "core_clk",
+			    "iface_clk",
+			    "mem_clk",
+			    "mem_iface_clk";
+			clocks =
+			    <&mmcc GFX3D_CLK>,
+			    <&mmcc GFX3D_AHB_CLK>,
+			    <&mmcc GFX3D_AXI_CLK>,
+			    <&mmcc MMSS_IMEM_AHB_CLK>;
+			qcom,chipid = <0x03020002>;
+			qcom,gpu-pwrlevels {
+				compatible = "qcom,gpu-pwrlevels";
+				qcom,gpu-pwrlevel@0 {
+					qcom,gpu-freq = <450000000>;
+				};
+				qcom,gpu-pwrlevel@1 {
+					qcom,gpu-freq = <27000000>;
+				};
+			};
+		};
+
+		mdp: qcom,mdp@5100000 {
+			compatible = "qcom,mdp";
+			reg = <0x05100000 0xf0000>;
+			interrupts = <GIC_SPI 75 0>;
+			connectors = <&hdmi>;
+			gpus = <&gpu>;
+			clock-names =
+			    "core_clk",
+			    "iface_clk",
+			    "lut_clk",
+			    "src_clk",
+			    "hdmi_clk",
+			    "mdp_clk",
+			    "mdp_axi_clk";
+			clocks =
+			    <&mmcc MDP_CLK>,
+			    <&mmcc MDP_AHB_CLK>,
+			    <&mmcc MDP_LUT_CLK>,
+			    <&mmcc TV_SRC>,
+			    <&mmcc HDMI_TV_CLK>,
+			    <&mmcc MDP_TV_CLK>,
+			    <&mmcc MDP_AXI_CLK>;
+//			vdd-supply = <&footswitch_mdp>;
+		};
 	};
 };

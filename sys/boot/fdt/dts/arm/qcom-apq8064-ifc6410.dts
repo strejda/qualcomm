@@ -5,21 +5,46 @@
 	model = "Qualcomm APQ8064/IFC6410";
 	compatible = "qcom,apq8064-ifc6410", "qcom,apq8064";
 
+	memory {
+		device_type = "memory";
+		reg = < 0x80000000 0x40000000 >; /* XXX: 1GB RAM for now */
+	};
+
+	chosen {
+		bootargs = "-v";
+		stdin = "serial0";
+		stdout = "serial0";
+	};
+
+	aliases {
+		soc = &soc;
+		serial0 = &serial0;
+	};
+
+
+	memory {
+		device_type = "memory";
+		reg = < 0x80000000 0x40000000 >; /* XXX: 1GB RAM for now */
+	};
+
 	soc {
 		pinctrl@800000 {
-			i2c1_pins: i2c1 {
-				mux {
-					pins = "gpio20", "gpio21";
-					function = "gsbi1";
-				};
-			};
-
 			card_detect: card_detect {
 				mux {
 					pins = "gpio26";
 					function = "gpio";
 					bias-disable;
 				};
+			};
+		};
+
+		gsbi3: gsbi@16200000 {
+			status = "okay";
+			qcom,mode = <GSBI_PROT_I2C>;
+			i2c3: i2c@16280000 {
+				status = "okay";
+				pinctrl-0 = <&i2c3_pins>;
+				pinctrl-names = "default";
 			};
 		};
 
@@ -42,15 +67,91 @@
 		};
 
 		gsbi@16600000 {
-			status = "okay";
+			status = "ok";
 			qcom,mode = <GSBI_PROT_I2C_UART>;
-			uart0: serial@16640000 {
-				status = "okay";
+			serial@16640000 {
+				status = "ok";
 			};
 		};
 
-		amba {
+		rpm@108000 {
+			pm8921_s3: pm8921-s3 {
+				regulator-min-microvolt		= <1000000>;
+				regulator-max-microvolt		= <1400000>;
+				qcom,switch-mode-frequency	= <4800000>;
+			};
 
+			pm8921_s4: pm8921-s4 {
+				regulator-min-microvolt		= <1800000>;
+				regulator-max-microvolt		= <1800000>;
+				qcom,switch-mode-frequency	= <3200000>;
+			};
+
+			pm8921_l3: pm8921-l3 {
+				regulator-min-microvolt = <3050000>;
+				regulator-max-microvolt = <3300000>;
+			};
+
+			pm8921_l4: pm8921-l4 {
+				regulator-min-microvolt = <1000000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			pm8921_l23: pm8921-l23 {
+				regulator-min-microvolt = <1700000>;
+				regulator-max-microvolt = <1900000>;
+			};
+		};
+
+		sata_phy0: sata-phy@1b400000{
+			status = "okay";
+		};
+
+		sata0: sata@29000000 {
+			status		= "okay";
+			target-supply	= <&pm8921_s4>;
+		};
+
+		/* OTG */
+		usb1_phy: phy@12500000 {
+			status		= "okay";
+			vddcx-supply	= <&pm8921_s3>;
+			v3p3-supply	= <&pm8921_l3>;
+			v1p8-supply	= <&pm8921_l4>;
+		};
+
+		usb3_phy: phy@12520000 {
+			status		= "okay";
+			vddcx-supply	= <&pm8921_s3>;
+			v3p3-supply	= <&pm8921_l3>;
+			v1p8-supply	= <&pm8921_l23>;
+		};
+
+		usb4_phy: phy@12530000 {
+			status		= "okay";
+			vddcx-supply	= <&pm8921_s3>;
+			v3p3-supply	= <&pm8921_l3>;
+			v1p8-supply	= <&pm8921_l23>;
+		};
+
+		gadget1: gadget@12500000 {
+			status = "okay";
+		};
+
+		/* OTG */
+		usb1: usb@12500000 {
+			status = "okay";
+		};
+
+		usb3: usb@12520000 {
+			status = "okay";
+		};
+
+		usb4: usb@12530000 {
+			status = "okay";
+		};
+
+		amba {
 			/* eMMC */
 			sdcc1: sdcc@12400000 {
 //				status = "okay";
@@ -67,8 +168,7 @@
 			sdcc4: sdcc@121c0000 {
 //				status = "okay";
 			};
-
 		};
-
 	};
 };
+
