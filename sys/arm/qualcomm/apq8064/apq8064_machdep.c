@@ -120,6 +120,7 @@ cpu_reset(void)
 	bus_space_handle_t tmr0;
 
 	printf("Resetting...\n");
+	/* Use global watchdog timer for board reset */
 	bus_space_map(fdtbus_bs_tag, TMR0_PHYSBASE, TMR0_SIZE, 0, &tmr0);
 	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_RST, 1);
 	bus_space_write_4(fdtbus_bs_tag, tmr0, WDT0_BARK_TIME, 5*0x31F3);
