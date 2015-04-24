@@ -798,11 +798,10 @@ static int
 pinctrl_map_gpios(device_t dev, phandle_t pdev, phandle_t gparent,
     int gcells, pcell_t *gpios, uint32_t *pin, uint32_t *flags)
 {
-
-	if (gcells != 3)
+	if (gcells != 2)
 		return (ERANGE);
-	*pin = gpios[1];
-	*flags= gpios[2];
+	*pin = gpios[0];
+	*flags= gpios[1];
 	return (0);
 }
 
