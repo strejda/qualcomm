@@ -162,6 +162,8 @@ apg8064_br_register(struct clkdom *clkdom, struct clk_br_def *clkdef,
 	sc->mtx = dev_mtx;
 	sc->mem_res = mem_res;
 
+	sc->ena_reg = clkdef->ena_reg;
+	sc->ena_mask = clkdef->ena_mask;
 	sc->hwcg_reg = clkdef->hwcg_reg;
 	sc->hwcg_mask = clkdef->hwcg_mask;
 	sc->halt_reg = clkdef->halt_reg;
