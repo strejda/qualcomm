@@ -708,6 +708,8 @@ pinctrl_pin_setflags(device_t dev, uint32_t pin, uint32_t flags)
 		PINCTRL_UNLOCK(sc);
 		return (ENXIO);
 	}
+
+	sc->gpio_pins[pin].gp_flags = flags;
 	cfg &= ~(GPIO_CFG_OE |
 	    (GPIO_CFG_GPIO_PULL_MASK << GPIO_CFG_GPIO_PULL_SHIFT));
 	if (flags & GPIO_PIN_OUTPUT)
@@ -723,7 +725,6 @@ pinctrl_pin_setflags(device_t dev, uint32_t pin, uint32_t flags)
 		    << GPIO_CFG_GPIO_PULL_SHIFT;
 
 	WR4(sc, GPIO_CFG(pin), cfg);
-	sc->gpio_pins[pin].gp_flags = flags;
 	PINCTRL_UNLOCK(sc);
 
 	return (0);
