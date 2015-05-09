@@ -387,7 +387,8 @@ pinctrl_gmux_function(const struct gpio_mux *gmux, char *fnc_name)
 	int i;
 
 	for (i = 0; i < 16; i++) {
-		if (strcmp(fnc_name, gmux->functions[i]) == 0)
+		if ((gmux->functions[i] != NULL) &&
+		    (strcmp(fnc_name, gmux->functions[i]) == 0))
 			return 	(i);
 	}
 
