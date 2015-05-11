@@ -186,22 +186,34 @@ apg8064_rcg_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 		*fout = fin;
 
 	/* Compute divider */
-	m = *fout;
-	n = fin;
-	prediv = 0;
-	while (((m & 1) == 0) && ((m & 1) == 0)) {
-		m >>= 1;
-		n >>= 1;
+	for (prediv = 0; prediv <= RCG_NS_PRE_DIV_SEL_MASK; prediv++) {
+		m = *fout;
+		n = fin / (prediv + 1);
+		while (((m & 1) == 0) && ((m & 1) == 0)) {
+			m >>= 1;
+			n >>= 1;
+		}
+
+		while (((m & ~sc->mask) != 0) || ((n & ~sc->mask) != 0)) {
+			m >>= 1;
+			n >>= 1;
+		}
+		while ((((fin / (prediv + 1)) * m) / n) > *fout)
+			n++;
+		while (((m & ~sc->mask) != 0) || ((n & ~sc->mask) != 0)) {
+			m >>= 1;
+			n >>= 1;
+		}
+		if ((((fin / (prediv + 1)) * m) / n) > *fout)
+			continue;
+		if (m != 0)
+			break;
 	}
-	while (((m & ~sc->mask) != 0) || ((n & ~sc->mask) != 0)) {
-		m >>= 1;
-		n >>= 1;
-	}
-	if (((fin * m) / n) != *fout)
-		n++;
-	while (((m & ~sc->mask) != 0) || ((n & ~sc->mask) != 0)) {
-		m >>= 1;
-		n >>= 1;
+	/* To low frequency - use maximum divider*/
+	if (m == 0) {
+		m = 1;
+		prediv = RCG_NS_PRE_DIV_SEL_MASK;
+		n = sc->mask;
 	}
 
 	/* Transform to hw values */
@@ -234,9 +246,10 @@ apg8064_rcg_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	WR4(sc, sc->ns_reg, ns);
 	DEVICE_UNLOCK(sc);
 
-	*fout = fin * m;
+	*fout = (fin / (prediv + 1)) * m;
 	*fout /= n;
 	*stop = 1;
+
 	return (0);
 }
 
