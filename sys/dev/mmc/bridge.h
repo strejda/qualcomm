@@ -131,6 +131,7 @@ struct mmc_host {
 #define MMC_CAP_4_BIT_DATA	(1 << 0) /* Can do 4-bit data transfers */
 #define MMC_CAP_8_BIT_DATA	(1 << 1) /* Can do 8-bit data transfers */
 #define MMC_CAP_HSPEED		(1 << 2) /* Can do High Speed transfers */
+#define MMC_CAP_FORCE_8_BIT_DATA (1 << 16) /* Force 8-bit data transfers */
 	enum mmc_card_mode mode;
 	struct mmc_ios ios;	/* Current state of the host */
 };
