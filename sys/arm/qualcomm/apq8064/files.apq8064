@@ -3,30 +3,45 @@
 #
 # Standard ARM support.
 #
-arm/arm/bus_space_asm_generic.S		standard
-arm/arm/bus_space_generic.c		standard
-kern/kern_clocksource.c			standard
-arm/arm/gic.c				standard
 arm/arm/amba.c				standard
+arm/arm/bus_space_asm_generic.S		standard
 arm/arm/bus_space_base.c		standard
+arm/arm/bus_space_generic.c		standard
+arm/arm/gic.c				standard
+arm/arm/syscon.c			standard
+arm/arm/syscon_if.m			standard
+kern/kern_clocksource.c			standard
+
+arm/qualcomm/ahci_generic.c		optional	ahci
 
 #
 # Standard SOC devices and support.
 #
 arm/qualcomm/msm_uart.c			standard
-arm/qualcomm/mmci.c			standard
+arm/qualcomm/mmci.c			optional	mmc
 arm/qualcomm/qcom_gsbi.c		standard
+arm/qualcomm/qcom_ssbi.c		standard
+arm/qualcomm/qcom_ssbi_if.m		standard
 arm/qualcomm/qcom_scm.c			optional	smp
 arm/qualcomm/qcom_scm_asm.S		optional	smp
+arm/qualcomm/qcom_rpm.c			standard
+arm/qualcomm/qcom_rpm_if.m		standard
+arm/qualcomm/qcom_rpm_regulators.c	optional	fdt_regulator
+arm/qualcomm/qcom_pcie.c		optional	pci
+arm/qualcomm/qcom_otg_phy.c		optional	ehci
+arm/qualcomm/qcom_ehci.c		optional	ehci
+arm/qualcomm/qcom_kpss.c		standard
 arm/qualcomm/apq8064/apq8064_machdep.c	standard
 arm/qualcomm/apq8064/apq8064_mp.c	optional	smp
 arm/qualcomm/apq8064/apq8064_timer.c	standard
 arm/qualcomm/apq8064/apq8064_clk_pll.c	standard
+arm/qualcomm/apq8064/apq8064_clk_hfpll.c standard
 arm/qualcomm/apq8064/apq8064_clk_rcg.c	standard
 arm/qualcomm/apq8064/apq8064_clk_br.c	standard
 arm/qualcomm/apq8064/apq8064_mcc.c	standard
 arm/qualcomm/apq8064/apq8064_gcc.c	standard
-arm/qualcomm/apq8064/apq8064_pinctrl.c	standard
+arm/qualcomm/apq8064/apq8064_pinctrl.c	optional	fdt_pinctrl
+arm/qualcomm/apq8064/apq8064_sata_phy.c	optional	ahci
 
 #
 # Board devices.
