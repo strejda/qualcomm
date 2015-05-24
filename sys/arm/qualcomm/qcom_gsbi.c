@@ -148,12 +148,12 @@ qcom_gsbi_attach(device_t dev)
 		return (ENXIO);
 	}
 	WR4(sc, GSBI_CTRL_REG,
-	    ((sc->mode & GSBI_PROTOCOL_MASK) << GSBI_PROTOCOL_SHIFT) | 
+	    ((sc->mode & GSBI_PROTOCOL_MASK) << GSBI_PROTOCOL_SHIFT) |
 	    ((sc->crci & GSBI_CRCI_MASK) << GSBI_CRCI_MASK));
 
 	simplebus_init(dev, 0);
 	for (node = OF_child(node); node > 0;
-	    node = OF_peer(node)) 
+	    node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
 	return (bus_generic_attach(dev));
 }
