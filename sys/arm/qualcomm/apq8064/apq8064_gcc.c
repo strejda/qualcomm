@@ -54,6 +54,35 @@ __FBSDID("$FreeBSD$");
 #include <gnu/dts/include/dt-bindings/reset/qcom,gcc-msm8960.h>
 #include "apq8064_clk.h"
 
+
+
+/*
+ * PLL freqency VCO = REF * [L+(M/N)] / (2 * P)
+ *
+ *
+ * PLL	  DS Name  Type   Source   Freq (MHz)	VDD)	Notes		 Subsystem
+ * PLL0	  GPLL0	   SR	 PXO	   800.000	0.945	FABRIC/DDR PLL	 RPM
+ * PLL1	  MMPLL0   SR	 PXO	  1332.000	1.050	MM FABRIC	 Multimedia
+ * PLL2	  MMPLL1   SR	 PXO	   800.000	0.945	Display		 Multimedia
+ * PLL3	  GPLL01   SR2	 PXO	  1200.000	1.050	QDS		 Apps
+ * PLL4	  PLL4     SR	 PXO	   393.216	0.945	LPA		 LPA
+ 	 			   491.520
+ * PLL5	  MPLL0	   SR	 CXO	   288.000	0.945	GPS PLL		 Modem
+ * PLL8	  PLL8     SR	 PXO	   384.000	0.945	Peripherals,
+ *							RPM, and modem	 Shared
+ * PLL9	  SC_PLL0  HF	 PXO	Up to 2000	1.050	Apps Core0	 Apps
+ * PLL10  SC_PLL1  HF	 PXO	Up to 2000	1.050	Apps Core1	 Apps
+ * PLL11  EBI1PLL  SR2	 PXO	  1066.000	1.050	Turbo FABRIC/DDR RPM
+ * PLL12  SCL2PLL  HF	 PXO	Up to 1700	1.050	Apps L2		 Apps
+ * PLL13  WCNPLL   SR2	 WCNXO	   960.000	0.945	WCNPLL		 WCNSS
+   		  	 CXO - used if WCNXO absent
+ * PLL14  PLL14    SR	 PXO	   480.000	0.945	HSIC PLL	 Apps
+ * PLL15  MMPLL3   SR	 PXO	   975.000	0.945	Graphics PLL	 Apps
+ * PLL16  SC_PLL2  HF	 PXO	Up to 2000	1.050	Apps Core2	 Apps
+ * PLL17  SC_PLL3  HF	 PXO 	Up to 2000	1.050	Apps Core3	 Apps
+ *
+ */
+
 static struct ofw_compat_data compat_data[] = {
 	{"qcom,gcc-apq8064",	1},
 	{NULL,		 	0},
@@ -90,7 +119,28 @@ static struct clk_fixed_def fixed_tbl[] = {
 	FRATE(0, "mxo", 27000000),
 };
 
-#define PLL(_id, cn, plist, mr, l, m, n, cr, sr, sm)			\
+PLIST(p_pxo_N_cxo) = {"pxo", NULL, "cxo"};
+PLIST(p_pxo_cxo) = {"pxo", "cxo"};
+PLIST(p_pxo) = {"pxo"};
+
+static struct clk_pll_cfg pll14_cfg = {
+	.l_val = 0x11 | (0x620 << 7),
+	.m_val = 0x7,
+	.n_val = 0x9,
+	.vco_val = 0x0,
+	.vco_mask = 3 << 16,
+	.pre_div_val = 0x0,
+	.pre_div_mask = 1 <<19,
+	.post_div_val = 0x0,
+	.post_div_mask = 3 << 20,
+	.mn_ena_val = 1 << 22,
+	.mn_ena_mask = 1 << 22,
+	.main_output_val = 1 << 23,
+	.main_output_mask = 1 << 23,
+	.fsm_mode = 1
+};
+
+#define PLL(_id, cn, plist, mr, l, m, n, cr, sr, sm, cf)		\
 {									\
 	.clkdef.id = _id,						\
 	.clkdef.name = cn,						\
@@ -103,19 +153,40 @@ static struct clk_fixed_def fixed_tbl[] = {
 	.cfg_reg = cr,							\
 	.status_reg = sr,						\
 	.status_mask = (1 << sm),					\
+	.cfg = cf,							\
 }
 
-PLIST(p_pxo_N_cxo) = {"pxo", NULL, "cxo"};
-PLIST(p_pxo_cxo) = {"pxo", "cxo"};
-PLIST(p_pxo) = {"pxo"};
-
 static struct clk_pll_def pll_tbl[] = {
- PLL(PLL0,  "pll0",  p_pxo,       0x30C0, 0x30C4, 0x30C8, 0x30C8, 0x30D4, 0x30D8, 16),
- PLL(PLL3,  "pll3",  p_pxo,       0x3160, 0x3164, 0x3168, 0x316C, 0x3174, 0x3178, 16),
- PLL(PLL5,  "pll5",  p_pxo_N_cxo, 0x30E0, 0x30E4, 0x30E8, 0x30EC, 0x30F4, 0x30F8, 16),
- PLL(PLL8,  "pll8",  p_pxo,       0x3140, 0x3144, 0x3148, 0x314C, 0x3154, 0x3158, 16),
- PLL(PLL14, "pll14", p_pxo_cxo,   0x31C0, 0x31C4, 0x31C8, 0x31CC, 0x31D4, 0x31D8, 16),
+ PLL(PLL0,  "pll0",  p_pxo,       0x30C0, 0x30C4, 0x30C8, 0x30C8, 0x30D4, 0x30D8, 16, NULL),
+ PLL(PLL5,  "pll5",  p_pxo_N_cxo, 0x30E0, 0x30E4, 0x30E8, 0x30EC, 0x30F4, 0x30F8, 16, NULL),
+ PLL(PLL8,  "pll8",  p_pxo,       0x3140, 0x3144, 0x3148, 0x314C, 0x3154, 0x3158, 16, NULL),
+ PLL(PLL3,  "pll3",  p_pxo,       0x3160, 0x3164, 0x3168, 0x316C, 0x3174, 0x3178, 16, NULL),  /* GPLL1 in TRM */
+ PLL(PLL14, "pll14", p_pxo_cxo,   0x31C0, 0x31C4, 0x31C8, 0x31CC, 0x31D4, 0x31D8, 16, &pll14_cfg),
 };
+
+#define HFPLL(_id, cn, plist, mr, l, m, n, cr, sr, dr)			\
+{									\
+	.clkdef.id = _id,						\
+	.clkdef.name = cn,						\
+	.clkdef.parent_names = plist,					\
+	.clkdef.parents_num = nitems(plist),				\
+	.mode_reg = mr,							\
+	.l_reg = l,							\
+	.m_reg = m,							\
+	.n_reg = n,							\
+	.cfg_reg = cr,							\
+	.status_reg = sr,						\
+	.droop_reg = dr,						\
+}
+
+static struct clk_hfpll_def hfpll_tbl[] = {
+ HFPLL(PLL9,  "pll9",  p_pxo, 0x3200, 0x3208, 0x320c, 0x3210, 0x3204, 0x3204, 0x3214), /* SC_PLL0 in TRM */
+ HFPLL(PLL10, "pll10", p_pxo, 0x3240, 0x3248, 0x324c, 0x3250, 0x3244, 0x325c, 0x3254), /* SC_PLL1 in TRM */
+ HFPLL(PLL16, "pll16", p_pxo, 0x3280, 0x3288, 0x328c, 0x3290, 0x3284, 0x329c, 0x3294), /* SC_PLL2 in TRM*/
+ HFPLL(PLL17, "pll17", p_pxo, 0x32c0, 0x32c8, 0x32cc, 0x32d0, 0x32c4, 0x32dc, 0x32d4), /* SC_PLL3 in TRM*/
+ HFPLL(PLL12, "pll12", p_pxo, 0x3300, 0x3308, 0x330c, 0x3310, 0x3304, 0x331c, 0x3314), /* SC_L2_PLL3 in TRM */
+};
+
 
 #define GATE(_id, cname, plist, o, s)					\
 {									\
@@ -132,11 +203,11 @@ static struct clk_pll_def pll_tbl[] = {
 }
 
 static struct clk_gate_def gate_tbl[] = {
- GATE( PLL0_VOTE,  "pll0_vote",  "pll0",  0x34c0,  0),
- GATE( PLL3_VOTE,  "pll3_vote",  "pll3",  0x34c0,  3),
- GATE( PLL5_VOTE,  "pll5_vote",  "pll5",  0x34c0,  5),
- GATE( PLL8_VOTE,  "pll8_vote",  "pll8",  0x34c0,  8),
- GATE(PLL14_VOTE, "pll14_vote", "pll14",  0x34c0, 14),
+ GATE( PLL0_VOTE,  "pll0_vote",  "pll0", 0x34c0,  0),
+ GATE( PLL3_VOTE,  "pll3_vote",  "pll3", 0x34c0,  3),
+ GATE( PLL5_VOTE,  "pll5_vote",  "pll5", 0x34c0,  5),
+ GATE( PLL8_VOTE,  "pll8_vote",  "pll8", 0x34c0,  8),
+ GATE(PLL14_VOTE, "pll14_vote", "pll14", 0x34c0, 14),
 };
 
 #define RCG(_id, cname, plist, ns, md, ms)				\
@@ -153,7 +224,7 @@ static struct clk_gate_def gate_tbl[] = {
 
 PLIST(gcc_pxo_pll8_map) = {"pxo", "mxo", "pll0_vote", "pll8_vote"};
 PLIST(gcc_pxo_pll8_cxo_map) = {"pxo", NULL, "pll0_vote", "pll8_vote", NULL, "cxo"};
-PLIST(gcc_pxo_pll8_pll3_map) = {"pxo", "pll14_vote", "pll0_vote", "pll8_vote"};
+PLIST(gcc_pxo_pll8_pll3_map) = {"pxo", NULL, "pll0_vote", "pll8_vote", NULL, NULL, "pll3_vote"};
 
 static struct clk_rcg_def rcg_tbl[] = {
  RCG(GSBI1_UART_SRC, "gsbi1_uart_src", gcc_pxo_pll8_map, 0x29d4, 0x29d0, 16),
@@ -244,23 +315,24 @@ static struct clk_br_def br_tbl[] = {
  BR(TSIF_REF_CLK, "tsif_ref_clk", "tsif_ref_src", 0x2710, 9, 0x2fd4, 5, 0, 0),
 
  BR(USB_HS1_XCVR_CLK, "usb_hs1_xcvr_clk", "usb_hs1_xcvr_src", 0x290c, 9, 0x2fc8,  0, 0, 0),
- BR(USB_HS3_XCVR_CLK, "usb_hs3_xcvr_clk", "usb_hs3_xcvr_src", 0x290c, 9, 0x2fc8,  0, 0, 0),
+ BR(USB_HS3_XCVR_CLK, "usb_hs3_xcvr_clk", "usb_hs3_xcvr_src", 0x370c, 9, 0x2fc8,  30, 0, 0),
  BR(USB_HS4_XCVR_CLK, "usb_hs4_xcvr_clk", "usb_hs4_xcvr_src", 0x372c, 9, 0x2fc8,  2, 0, 0),
 
  BR(USB_HSIC_XCVR_FS_CLK, "usb_hsic_xcvr_fs_clk", "usb_hsic_xcvr_fs_src", 0x2928, 9, 0x2fc8,  2, 0, 0),
  BR(USB_HSIC_SYSTEM_CLK, "usb_hsic_system_clk", "usb_hsic_xcvr_fs_src", 0x292c, 4, 0x2fcc, 24, 0, 0),
  BR(USB_HSIC_HSIC_CLK, "usb_hsic_hsic_clk", "pll14_vote", 0x2b44, 0, 0x2fcc, 19, 0, 0),
- BR(USB_HSIC_HSIO_CAL_CLK, "usb_hsic_hsio_cal_clk", "cxo", 0x2b48, 0, 0x2fcc, 23, 0, 0),
+ BR(USB_HSIC_HSIO_CAL_CLK, "usb_hsic_hsio_cal_clk", "pxo", 0x2b48, 0, 0x2fcc, 23, 0, 0),
  BR(USB_FS1_XCVR_FS_CLK, "usb_fs1_xcvr_fs_clk", "usb_fs1_xcvr_fs_src", 0x2968, 9, 0x2fcc, 15, 0, 0),
  BR(USB_FS1_SYSTEM_CLK, "usb_fs1_system_clk", "usb_fs1_xcvr_fs_src", 0x296c, 4, 0x2fcc, 16, 0, 0),
 
  BR(SATA_H_CLK, "sata_h_clk", "cxo", 0x2c00, 4, 0x2fdc, 27, 0, 0),
- BR(SATA_RXOOB_CLK, "sata_rxoob_clk", "cxo", 0x2c0c, 4, 0x2fdc, 26, 0, 0),
+ BR(SATA_RXOOB_CLK, "sata_rxoob_clk", "sata_clk_src", 0x2c0c, 4, 0x2fdc, 26, 0, 0),
  BR(SATA_PMALIVE_CLK, "sata_pmalive_clk", "sata_clk_src", 0x2c10, 4, 0x2fdc, 25, 0, 0),
  BR(SATA_PHY_REF_CLK, "sata_phy_ref_clk", "pxo", 0x2c14, 4, 0x2fdc, 24, 0, 0),
  BR(SATA_PHY_CFG_CLK, "sata_phy_cfg_clk", "cxo", 0x2c40, 4, 0x2fcc, 12, 0, 0),
  BR(SATA_A_CLK, "sata_a_clk", "cxo", 0x2c20, 4, 0x2fc0, 12, 0, 0),
  BR(SFAB_SATA_S_H_CLK, "sfab_sata_s_h_clk", "cxo", 0x2480, 4, 0x2fc4, 14, 0, 0),
+
  BR(CE3_CORE_CLK, "ce3_core_clk", "ce3_src", 0x36c4, 4, 0x2fdc, 5, 0, 0),
  BR(CE3_H_CLK, "ce3_h_clk", "ce3_src", 0x36c4, 4, 0x2fc4, 16, 0, 0),
 
@@ -275,7 +347,7 @@ static struct clk_br_def br_tbl[] = {
  BR(TSIF_H_CLK, "tsif_h_clk", "cxo", 0x2700, 4, 0x2fd4, 7, 0x2700, 6),
  BR(USB_FS1_H_CLK, "usb_fs1_h_clk", "cxo", 0x2960, 4, 0x2fcc, 17, 0, 0),
  BR(USB_HS1_H_CLK, "usb_hs1_h_clk", "cxo", 0x2900, 4, 0x2fc8, 1, 0, 0),
- BR(USB_HS1_H_CLK, "usb_hsic_h_clk", "cxo", 0x2920, 4, 0x2fcc, 28, 0, 0),
+ BR(USB_HSIC_H_CLK, "usb_hsic_h_clk", "cxo", 0x2920, 4, 0x2fcc, 28, 0, 0),
  BR(USB_HS3_H_CLK, "usb_hs3_h_clk", "cxo", 0x3700, 4, 0x2fc8, 31, 0, 0),
  BR(USB_HS4_H_CLK, "usb_hs4_h_clk", "cxo", 0x3720, 4, 0x2fc8, 7, 0, 0),
 
@@ -397,8 +469,7 @@ init_fixed(struct apq8064_gcc_softc *sc)
 	int i, rv;
 
 	for (i = 0; i < nitems(fixed_tbl); i++) {
-		rv = clknode_fixed_register(sc->clkdom, fixed_tbl + i,
-		    &sc->mtx);
+		rv = clknode_fixed_register(sc->clkdom, fixed_tbl + i);
 		if (rv != 0)
 			panic("clknode_fixed_register failed");
 	}
@@ -412,8 +483,7 @@ init_gates(struct apq8064_gcc_softc *sc)
 
 
 	for (i = 0; i < nitems(gate_tbl); i++) {
-		rv = clknode_gate_register(sc->clkdom, gate_tbl + i,
-		    &sc->mtx, sc->mem_res);
+		rv = clknode_gate_register(sc->clkdom, gate_tbl + i);
 		if (rv != 0)
 			panic("clk_gate_register failed");
 	}
@@ -426,10 +496,21 @@ init_plls(struct apq8064_gcc_softc *sc)
 	int i, rv;
 
 	for (i = 0; i < nitems(pll_tbl); i++) {
-		rv = apg8064_pll_register(sc->clkdom, pll_tbl + i, &sc->mtx,
-		    sc->mem_res);
+		rv = apg8064_pll_register(sc->clkdom, pll_tbl + i);
 		if (rv != 0)
 			panic("apg8064_pll_register failed");
+	}
+}
+
+static void
+init_hfplls(struct apq8064_gcc_softc *sc)
+{
+	int i, rv;
+
+	for (i = 0; i < nitems(hfpll_tbl); i++) {
+		rv = apg8064_hfpll_register(sc->clkdom, hfpll_tbl + i);
+		if (rv != 0)
+			panic("apg8064_hfpll_register failed");
 	}
 }
 
@@ -439,8 +520,7 @@ init_rcgs(struct apq8064_gcc_softc *sc)
 	int i, rv;
 
 	for (i = 0; i < nitems(rcg_tbl); i++) {
-		rv = apg8064_rcg_register(sc->clkdom, rcg_tbl + i, &sc->mtx,
-		    sc->mem_res);
+		rv = apg8064_rcg_register(sc->clkdom, rcg_tbl + i);
 		if (rv != 0)
 			panic("apg8064_rcg_register failed");
 	}
@@ -451,8 +531,7 @@ init_branches(struct apq8064_gcc_softc *sc)
 	int i, rv;
 
 	for (i = 0; i < nitems(br_tbl); i++) {
-		rv = apg8064_br_register(sc->clkdom, br_tbl + i, &sc->mtx,
-		    sc->mem_res);
+		rv = apg8064_br_register(sc->clkdom, br_tbl + i);
 		if (rv != 0)
 			panic("apg8064_br_register failed");
 	}
@@ -468,18 +547,92 @@ register_clocks(device_t dev)
 	sc->clkdom = clkdom_create(dev);
 	init_fixed(sc);
 	init_plls(sc);
+	init_hfplls(sc);
 	init_gates(sc);
 	init_rcgs(sc);
 	init_branches(sc);
 	clkdom_finit(sc->clkdom);
+
+	clknode = clknode_find_by_name(sc->clkdom, "gsbi6_uart_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+clknode_set_freq(clknode, 1843200, 1, 1);
+
 	clknode = clknode_find_by_name(sc->clkdom, "sdc1_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
 	clknode = clknode_find_by_name(sc->clkdom, "sdc3_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
 	clknode = clknode_find_by_name(sc->clkdom, "sdc4_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode = clknode_find_by_name(sc->clkdom, "sata_clk_src");
+	clknode_set_parent_by_name(clknode, "pll3_vote");
+clknode_set_freq(clknode, 100000000, 1, 1);
+
+
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hs1_xcvr_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hs3_xcvr_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hs4_xcvr_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+	clknode = clknode_find_by_name(sc->clkdom, "usb_fs1_xcvr_fs_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_xcvr_fs_src");
+	clknode_set_parent_by_name(clknode, "pll8_vote");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_hsic_clk");
+	clknode_set_freq(clknode, 480000000, 1, 1);
+	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_system_clk");
+	clknode_set_freq(clknode, 60000000, 1, 1);
+
 	clkdom_finit(sc->clkdom);
 //	postinit_clock(sc);
+}
+
+static int
+apq8064_gcc_clkdev_read(device_t dev, bus_addr_t addr, uint32_t *val)
+{
+	struct apq8064_gcc_softc *sc;
+
+	sc = device_get_softc(dev);
+	mtx_lock(&sc->mtx);
+	*val = bus_read_4(sc->mem_res, addr);
+	mtx_unlock(&sc->mtx);
+	return (0);
+}
+
+static int
+apq8064_gcc_clkdev_write(device_t dev, bus_addr_t addr, uint32_t val)
+{
+	struct apq8064_gcc_softc *sc;
+
+	sc = device_get_softc(dev);
+	mtx_lock(&sc->mtx);
+	bus_write_4(sc->mem_res, addr, val);
+	mtx_unlock(&sc->mtx);
+	return (0);
+}
+
+
+static int
+apq8064_gcc_clkdev_modify(device_t dev, bus_addr_t addr, uint32_t clear_mask,
+    uint32_t set_mask)
+{
+	struct apq8064_gcc_softc *sc;
+	uint32_t reg;
+
+	sc = device_get_softc(dev);
+	mtx_lock(&sc->mtx);
+	reg = bus_read_4(sc->mem_res, addr);
+	reg &= clear_mask;
+	reg |= set_mask;
+	bus_write_4(sc->mem_res, addr, reg);
+	mtx_unlock(&sc->mtx);
+	return (0);
 }
 
 static int
@@ -494,12 +647,12 @@ apq8064_gcc_reset_set(device_t dev, int id, int value)
 	if (resets[id].reg == 0)
 		return (ENXIO);
 	mtx_lock(&sc->mtx);
-	reg = RD4(sc, resets[id].reg);
+	reg = bus_read_4(sc->mem_res, resets[id].reg);
 	if (value)
 		reg |= 1 << resets[id].bit;
 	else
 		reg &= ~(1 << resets[id].bit);
-	WR4(sc, resets[id].reg, reg);
+	bus_write_4(sc->mem_res, resets[id].reg, reg);
 	mtx_unlock(&sc->mtx);
 	return (0);
 }
@@ -518,6 +671,7 @@ apq8064_gcc_probe(device_t dev)
 
 	return (ENXIO);
 }
+
 
 static int
 apq8064_gcc_attach(device_t dev)
@@ -539,11 +693,9 @@ apq8064_gcc_attach(device_t dev)
 		rv = ENXIO;
 		goto fail;
 	}
-
 	register_clocks(dev);
 	fdt_reset_register_provider(dev);
-//for(;;)
-//;
+
 	return (0);
 
 fail:
@@ -561,23 +713,17 @@ apq8064_gcc_detach(device_t dev)
 	return (EBUSY);
 }
 
-static phandle_t
-apq8064_gcc_get_node(device_t bus, device_t dev)
-{
-
-	/* We only have one child, the GPIO bus, which needs our own node. */
-	return (ofw_bus_get_node(bus));
-}
-
 static device_method_t apq8064_gcc_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,		apq8064_gcc_probe),
 	DEVMETHOD(device_attach,	apq8064_gcc_attach),
 	DEVMETHOD(device_detach,	apq8064_gcc_detach),
-	/* ofw_bus interface */
-	DEVMETHOD(ofw_bus_get_node,	apq8064_gcc_get_node),
 	/* fdt reset interface */
 	DEVMETHOD(fdt_reset_set,	apq8064_gcc_reset_set),
+	/* clkdev  interface*/
+	DEVMETHOD(clkdev_read,		apq8064_gcc_clkdev_read),
+	DEVMETHOD(clkdev_write,		apq8064_gcc_clkdev_write),
+	DEVMETHOD(clkdev_modify,	apq8064_gcc_clkdev_modify),
 
 	DEVMETHOD_END
 };
@@ -592,3 +738,4 @@ static driver_t apq8064_gcc_driver = {
 
 EARLY_DRIVER_MODULE(apq8064_gcc, simplebus, apq8064_gcc_driver,
     apq8064_gcc_devclass, 0, 0, BUS_PASS_TIMER);
+

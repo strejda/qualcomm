@@ -72,8 +72,7 @@ __FBSDID("$FreeBSD$");
 
 
 struct rcg_sc {
-	struct mtx	*mtx;
-	struct resource	*mem_res;
+	struct clknode	*clknode;
 	uint32_t	md_reg;
 	uint32_t	ns_reg;
 	uint32_t	mask;
@@ -89,15 +88,18 @@ apg8064_rcg_recalc(struct clknode *clk, uint64_t *freq)
 
 	sc = clknode_get_softc(clk);
 
-	DEVICE_LOCK(sc);
 	ns = RD4(sc, sc->ns_reg);
 	if (sc->md_reg != 0)
 		md = RD4(sc, sc->md_reg);
-	DEVICE_UNLOCK(sc);
 
 	/* No divider */
-	if (sc->md_reg == 0)
+	if (sc->md_reg == 0) {
+		/* XXX not now HACK */
+		ns >>= 3;
+		ns &= 0xF;
+		*freq /= (ns + 1);
 		return (0);
+	}
 
 	pre_div = (ns >> RCG_NS_PRE_DIV_SEL_SHIFT) & RCG_NS_PRE_DIV_SEL_MASK;
 
@@ -136,11 +138,7 @@ apg8064_rcg_init(struct clknode *clk, device_t dev)
 	uint32_t	ns;
 
 	sc = clknode_get_softc(clk);
-
-	DEVICE_LOCK(sc);
 	ns = RD4(sc, sc->ns_reg);
-	DEVICE_UNLOCK(sc);
-
 	clknode_init_parent_idx(clk,
 	    (ns >> RCG_NS_SRC_SEL_SHIFT) & RCG_NS_SRC_SEL_MASK);
 	return(0);
@@ -154,12 +152,11 @@ apg8064_rcg_set_mux(struct clknode *clk, int idx)
 
 	sc = clknode_get_softc(clk);
 
-	DEVICE_LOCK(sc);
 	ns = RD4(sc, sc->ns_reg);
 	ns &= ~(RCG_NS_SRC_SEL_MASK << RCG_NS_SRC_SEL_SHIFT);
 	ns |= (idx & RCG_NS_SRC_SEL_MASK) << RCG_NS_SRC_SEL_SHIFT;
 	WR4(sc, sc->ns_reg, ns);
-	DEVICE_UNLOCK(sc);
+
 	return (0);
 }
 
@@ -170,18 +167,32 @@ apg8064_rcg_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
    uint64_t *prec, int *stop)
 {
 	struct rcg_sc *sc;
-	uint32_t n, m, rn, rm, rd, ns, md, prediv;
+	uint32_t n, m, rn, rm, rd, ns, md, prediv, div;
 
 	sc = clknode_get_softc(clk);
 
 	/* Integer only divider  */
 	if (sc->md_reg == 0) {
-		/* XXX not now */
+		/* XXX not now HACK */
+		ns = RD4(sc, sc->ns_reg) &
+		    (RCG_NS_SRC_SEL_MASK << RCG_NS_SRC_SEL_SHIFT);
+		ns |= (1 << 7); // ENABLE
+		div = fin / *fout;
+		if ((*fout * div) > fin)
+			div++;
+		if (div > 16)
+			div = 16;
+		*fout  =  fin / div;
+printf("%s: XXXXXXXXXXXXXXX fout: %lld, fin: %lld, div: %d\n", __func__, *fout, fin, div);
+		div--;
+		ns |= div << 3;
+printf("%s: XXXXXXXXXXXXXXX  ns: 0x%08X, reg: 0x%08X, old: 0x%08X\n", __func__, ns, sc->ns_reg, RD4(sc, sc->ns_reg));
+		WR4(sc, sc->ns_reg, ns);
 		*stop = 1;
-		return (1);
+		return (0);
 	}
 
-	/* XXX checks here */
+	/* XXX more checks here */
 	if (fin < *fout)
 		*fout = fin;
 
@@ -222,7 +233,6 @@ apg8064_rcg_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	rn = ~(n - m);
 
 	/* Write to hw */
-	DEVICE_LOCK(sc);
 	ns = RD4(sc, sc->ns_reg);
 	WR4(sc, sc->ns_reg, ns | RCG_NS_MNCNTR_RST);
 	ns &= ~(RCG_NS_PRE_DIV_SEL_MASK << RCG_NS_PRE_DIV_SEL_SHIFT);
@@ -244,7 +254,6 @@ apg8064_rcg_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	WR4(sc, sc->md_reg, md);
 	WR4(sc, sc->ns_reg, ns| RCG_NS_MNCNTR_RST);
 	WR4(sc, sc->ns_reg, ns);
-	DEVICE_UNLOCK(sc);
 
 	*fout = (fin / (prediv + 1)) * m;
 	*fout /= n;
@@ -265,8 +274,7 @@ DEFINE_CLASS_1(apg8064_rcg, apg8064_rcg_class, apg8064_rcg_methods,
    sizeof(struct rcg_sc), clknode_class);
 
 int
-apg8064_rcg_register(struct clkdom *clkdom, struct clk_rcg_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+apg8064_rcg_register(struct clkdom *clkdom, struct clk_rcg_def *clkdef)
 {
 	struct clknode *clk;
 	struct rcg_sc *sc;
@@ -276,8 +284,7 @@ apg8064_rcg_register(struct clkdom *clkdom, struct clk_rcg_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
+	sc->clknode = clk;
 
 	sc->md_reg = clkdef->md_reg;
 	sc->ns_reg = clkdef->ns_reg;

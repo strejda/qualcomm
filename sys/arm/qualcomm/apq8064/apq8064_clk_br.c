@@ -46,8 +46,7 @@ __FBSDID("$FreeBSD$");
  */
 
 struct br_sc {
-	struct mtx	*mtx;
-	struct resource	*mem_res;
+	struct clknode	*clknode;
 	uint32_t	ena_reg;
 	uint32_t	ena_mask;
 	uint32_t	halt_reg;
@@ -119,7 +118,6 @@ apg8064_br_set_gate(struct clknode *clk, int enable)
 	int rv;
 
 	sc = clknode_get_softc(clk);
-	DEVICE_LOCK(sc);
 	val = RD4(sc, sc->ena_reg);
 	if (enable)
 		val |=  sc->ena_mask;
@@ -127,13 +125,11 @@ apg8064_br_set_gate(struct clknode *clk, int enable)
 		val &=  ~sc->ena_mask;
 	WR4(sc, sc->ena_reg, val);
 
-	if ((sc->halt_reg == 0) || is_hw_gated(sc)) {
-		DEVICE_UNLOCK(sc);
+	if ((sc->halt_reg == 0) || is_hw_gated(sc))
 		return (0);
-	}
+
 	/* Wait for finish */
 	rv = wait_for_halt(sc, enable);
-	DEVICE_UNLOCK(sc);
 
 	return (rv);
 }
@@ -148,8 +144,7 @@ DEFINE_CLASS_1(apg8064_br, apg8064_br_class, apg8064_br_methods,
    sizeof(struct br_sc), clknode_class);
 
 int
-apg8064_br_register(struct clkdom *clkdom, struct clk_br_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+apg8064_br_register(struct clkdom *clkdom, struct clk_br_def *clkdef)
 {
 	struct clknode *clk;
 	struct br_sc *sc;
@@ -159,8 +154,7 @@ apg8064_br_register(struct clkdom *clkdom, struct clk_br_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
+	sc->clknode = clk;
 
 	sc->ena_reg = clkdef->ena_reg;
 	sc->ena_mask = clkdef->ena_mask;

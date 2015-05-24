@@ -30,7 +30,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
-#include <sys/lock.h> 
+#include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/rman.h>
 #include <machine/bus.h>
@@ -40,36 +40,6 @@ __FBSDID("$FreeBSD$");
 
 
 
-enum pll_type {PLL_M, PLL_X, PLL_C, PLL_C2, PLL_C3, PLL_C4, PLL_P, PLL_A, PLL_U, 
-    PLL_D, PLL_D2, PLL_DP, PLL_E, PLL_REFE};
-
-/*
- * PLL freqency VCO = REF * [L+(M/N)] / (2 * P)
- *
- *
- * PLL	  Name    Type   Source   Freq (MHz)	VDD)	Notes		 Subsystem 
- * PLL0	  GPLL0	  SR	 PXO	   800.000	0.945	FABRIC/DDR PLL	 RPM
- * PLL1	  MMPLL0  SR	 PXO	  1332.000	1.050	MM FABRIC	 Multimedia
- * PLL2	  MMPLL1  SR	 PXO	   800.000	0.945	Display		 Multimedia
- * PLL3	  QDSPLL  SR2	 PXO	  1200.000	1.050	QDS		 Apps
- * PLL4	  LPAPLL  SR	 PXO	   393.216	0.945	LPA		 LPA
- 	 			   491.520			
- * PLL5	  MPLL0	  SR	 CXO	   288.000	0.945	GPS PLL		 Modem
- * PLL8	  SPPLL	  SR	 PXO	   384.000	0.945	Peripherals,
- *							RPM, and modem	 Shared
- * PLL9	  SCPLL0  HF	 PXO	Up to 2000	1.050	Apps Core0	 Apps
- * PLL10  SCPLL1  HF	 PXO	Up to 2000	1.050	Apps Core1	 Apps
- * PLL11  EBI1PLL SR2	 PXO	  1066.000	1.050	Turbo FABRIC/DDR RPM
- * PLL12  SCL2PLL HF	 PXO	Up to 1700	1.050	Apps L2		 Apps
- * PLL13  WCNPLL  SR2	 WCNXO	   960.000	0.945	WCNPLL		 WCNSS
-   		  	 CXO - used if WCNXO absent
- * PLL14  SP2PLL  SR	 PXO	   480.000	0.945	HSIC PLL	 Apps
- * PLL15  MMPLL3  SR	 PXO	   975.000	0.945	Graphics PLL	 Apps
- * PLL16  SCPLL2  HF	 PXO	Up to 2000	1.050	Apps Core2	 Apps
- * PLL17  SCPLL3  HF	 PXO 	Up to 2000	1.050	Apps Core3	 Apps
- *
- */
- 
 /* PLL MODE register bits */
 #define PLL_VOTE_FSM_RESET	(1 << 21)
 #define PLL_VOTE_FSM_ENA	(1 << 20)
@@ -103,9 +73,7 @@ enum pll_type {PLL_M, PLL_X, PLL_C, PLL_C2, PLL_C3, PLL_C4, PLL_P, PLL_A, PLL_U,
 #define PLL_D_MASK		0xffff
 
 struct pll_sc {
-	struct mtx	*mtx;
-	struct resource	*mem_res;
-	enum pll_type	type;
+	struct clknode	*clknode;
 	uint32_t	l_reg;
 	uint32_t	m_reg;
 	uint32_t	n_reg;
@@ -131,12 +99,13 @@ struct pll_freq_tbl *find_freq(const struct pll_freq_tbl *f, unsigned long rate)
 	return NULL;
 }
 
-static void 
+static void
 clk_pll_enable(struct pll_sc *sc)
 {
 	uint32_t mode;
 
 	mode = RD4(sc, sc->mode_reg);
+printf("%s: PLL mode: 0x%08X(0x%08X), lock: 0x%08X (0x%08X)\n", __func__, mode, sc->mode_reg, RD4(sc, 0x3420) & (1 << 3), RD4(sc, 0x3420));
 	/* Do nothing if PLL is already enabed */
 	if ((mode & (PLL_OUTCTRL | PLL_RESET_N | PLL_BYPASSNL)) ==
 	    (PLL_OUTCTRL | PLL_RESET_N | PLL_BYPASSNL))
@@ -149,15 +118,19 @@ clk_pll_enable(struct pll_sc *sc)
 	mode |= PLL_BYPASSNL;
  	WR4(sc, sc->mode_reg, mode);
 	DELAY(10);
-	
+
 	/* Remove PLL form reset */
 	mode |= PLL_RESET_N;
  	WR4(sc, sc->mode_reg, mode);
 	DELAY(50);
-	
+
 	/* Finally, enable output */
 	mode |= PLL_OUTCTRL;
  	WR4(sc, sc->mode_reg, mode);
+
+DELAY(50);
+ printf("%s: PLL mode: 0x%08X, lock: 0x%08X (0x%08X)\n", __func__, mode, RD4(sc, 0x3420) & (1 << 3), RD4(sc, 0x3420));
+
 }
 
 static void
@@ -169,12 +142,12 @@ clk_pll_disable(struct pll_sc *sc)
 	/* Do nothing if PLL is controlled by FSM voting */
 	if (mode & PLL_VOTE_FSM_ENA)
 		return;
-		
+
 	/* Disable output first */
 	mode &= ~PLL_OUTCTRL;
 	WR4(sc, sc->mode_reg, mode);
 	DELAY(10);
-	
+
 	/* Then set bypass and reset */
 	mode &= ~(PLL_RESET_N | PLL_BYPASSNL);
 	WR4(sc, sc->mode_reg, mode);
@@ -191,13 +164,12 @@ apg8064_pll_recalc(struct clknode *clk, uint64_t *freq)
 
 	sc = clknode_get_softc(clk);
 
-	DEVICE_LOCK(sc);
 	l = RD4(sc, sc->l_reg) & 0x3FF;
 	m = RD4(sc, sc->m_reg) & 0x7FFFF;
 	n = RD4(sc, sc->n_reg) & 0x7FFFF;
 	cfg = RD4(sc, sc->cfg_reg);
 	mode = RD4(sc, sc->mode_reg);
-	DEVICE_UNLOCK(sc);
+
 printf("Parent: %lld, l: 0x%08X, m: 0x%08X, n: 0x%08X,  mode: 0x%08X,  cfg: 0x%08X\n", *freq, l, m, n, mode, cfg);
 printf("  l: 0x%08X, m: 0x%08X, n: 0x%08X,  cfg: 0x%08X\n", sc->l_reg, sc->m_reg, sc->n_reg, sc->cfg_reg);
 //	if (not_locked)
@@ -225,20 +197,91 @@ apg8064_pll_init(struct clknode *clk, device_t dev)
 {
 	struct pll_sc *sc;
 	uint32_t mode;
+
 	sc = clknode_get_softc(clk);
 
-	DEVICE_LOCK(sc);
 	mode =  RD4(sc, sc->mode_reg);
-	DEVICE_UNLOCK(sc);
 
-	clknode_init_parent_idx(clk, (mode >> PLL_REF_XO_SEL_SHIFT) & PLL_REF_XO_SEL_MASK);
+	clknode_init_parent_idx(clk,
+	    (mode >> PLL_REF_XO_SEL_SHIFT) & PLL_REF_XO_SEL_MASK);
 	return(0);
+}
+
+static int
+apg8064_pll_set_gate(struct clknode *clk, int enable)
+{
+	struct pll_sc *sc;
+
+	sc = clknode_get_softc(clk);
+	if (enable)
+		clk_pll_enable(sc);
+	else
+		clk_pll_disable(sc);
+
+	return (0);
+}
+
+static void
+configure_pll(struct clknode *clk, const struct clk_pll_cfg *cfg,
+    uint32_t bias_cnt, uint32_t lock_cnt)
+{
+	struct pll_sc *sc;
+	uint32_t val;
+
+	sc = clknode_get_softc(clk);
+
+	if ((RD4(sc, sc->status_reg) & PLL_ACTIVE_FLAG) != 0)
+		return;
+
+	/* PLL registers */
+	WR4(sc, sc->l_reg, cfg->l_val);
+	WR4(sc, sc->m_reg, cfg->m_val);
+	WR4(sc, sc->n_reg, cfg->n_val);
+
+	/* merge config bits */
+	val = RD4(sc, sc->cfg_reg);
+
+	val &= ~cfg->mn_ena_mask;
+	val |= cfg->mn_ena_val;
+
+	val &= ~cfg->main_output_mask;
+	val |= cfg->main_output_val;
+
+	val &= ~cfg->pre_div_mask;
+	val |= cfg->pre_div_val;
+
+	val &= ~cfg->post_div_mask;
+	val |= cfg->post_div_val;
+
+	val &= ~cfg->vco_mask;
+	val |= cfg->vco_val;
+	WR4(sc, sc->cfg_reg, val);
+
+	if (cfg->fsm_mode) {
+		val = RD4(sc, sc->mode_reg);
+
+		val &= ~PLL_VOTE_FSM_RESET;
+		WR4(sc, sc->mode_reg, val);
+
+		val &= ~(PLL_BIAS_COUNT_MASK << PLL_BIAS_COUNT_SHIFT);
+		val |= bias_cnt << PLL_BIAS_COUNT_SHIFT;
+		WR4(sc, sc->mode_reg, val);
+
+		val &= ~(PLL_LOCK_COUNT_MASK << PLL_LOCK_COUNT_SHIFT);
+		val |= lock_cnt << PLL_LOCK_COUNT_SHIFT;
+		WR4(sc, sc->mode_reg, val);
+
+		val |= PLL_VOTE_FSM_ENA;
+		WR4(sc, sc->mode_reg, val);
+
+	}
 }
 
 static clknode_method_t apg8064_pll_methods[] = {
 	/* Device interface */
 	CLKNODEMETHOD(clknode_init,		apg8064_pll_init),
 	CLKNODEMETHOD(clknode_recalc_freq,	apg8064_pll_recalc),
+	CLKNODEMETHOD(clknode_set_gate,		apg8064_pll_set_gate),
 //	CLKNODEMETHOD(clknode_set_freq,		apg8064_pll_set_freq),
 	CLKNODEMETHOD_END
 };
@@ -246,9 +289,9 @@ DEFINE_CLASS_1(apg8064_pll, apg8064_pll_class, apg8064_pll_methods,
    sizeof(struct pll_sc), clknode_class);
 
 
+
 int
-apg8064_pll_register(struct clkdom *clkdom, struct clk_pll_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+apg8064_pll_register(struct clkdom *clkdom, struct clk_pll_def *clkdef)
 {
 	struct clknode *clk;
 	struct pll_sc *sc;
@@ -258,8 +301,7 @@ apg8064_pll_register(struct clkdom *clkdom, struct clk_pll_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
+	sc->clknode = clk;
 
 	sc->l_reg = clkdef->l_reg;
 	sc->m_reg = clkdef->m_reg;
@@ -272,6 +314,7 @@ apg8064_pll_register(struct clkdom *clkdom, struct clk_pll_def *clkdef,
 	sc->post_div_shift = clkdef->post_div_shift;
 	sc->freq_tbl = clkdef->freq_tbl;
 	clknode_register(clkdom, clk);
+	if (clkdef->cfg != NULL)
+		configure_pll(clk, clkdef->cfg, 1, 8);
 	return (0);
 }
-
