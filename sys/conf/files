@@ -1418,6 +1418,9 @@ dev/fdt/fdt_phy.c		optional fdt fdt_phy
 dev/fdt/fdt_phy_if.m		optional fdt fdt_phy
 dev/fdt/fdt_pinctrl.c		optional fdt fdt_pinctrl
 dev/fdt/fdt_pinctrl_if.m	optional fdt fdt_pinctrl
+dev/fdt/fdt_regulator.c		optional fdt fdt_regulator
+dev/fdt/fdt_regulator_if.m	optional fdt fdt_regulator
+dev/fdt/fdt_regulator_fixed.c	optional fdt fdt_regulator_fixed
 dev/fdt/fdt_reset.c		optional fdt fdt_reset
 dev/fdt/fdt_reset_if.m		optional fdt fdt_reset
 dev/fdt/fdt_slicer.c		optional fdt cfi | fdt nand
