@@ -70,7 +70,7 @@ options 	DDB			# Enable the kernel debugger
 #options 	INVARIANTS		# Enable calls of extra sanity checking
 #options 	INVARIANT_SUPPORT	# Extra sanity checks of internal structures, required by INVARIANTS
 #options 	WITNESS			# Enable checks to detect deadlocks and cycles
-#options 	WITNESS_SKIPSPIN	# Don't run witness on spinlocks for speed
+options 	WITNESS_SKIPSPIN	# Don't run witness on spinlocks for speed
 
 # NFS root from boopt/dhcp
 #options 	BOOTP
@@ -85,12 +85,12 @@ device		loop			# Network loopback
 device		random			# Entropy device
 device		vlan			# 802.1Q VLAN support
 #device		tun			# Packet tunnel.
-#device		md			# Memory "disks"
+device		md			# Memory "disks"
 #device		gif			# IPv6 and IPv4 tunneling
 #device		firmware		# firmware assist module
 device		ether			# Ethernet support
-#device		miibus			# Required for ethernet
-#device	 	bpf			# Berkeley packet filter (required for DHCP)
+device		miibus			# Required for ethernet
+device	 	bpf			# Berkeley packet filter (required for DHCP)
 
 # General-purpose input/output
 device		gpio
@@ -104,22 +104,22 @@ device		mmc			# SD/MMC protocol
 device		mmcsd			# SDCard disk device
 
 # ATA controllers
-#device		ahci			# AHCI-compatible SATA controllers
+device		ahci			# AHCI-compatible SATA controllers
 #device		ata			# Legacy ATA/SATA controllers
-#options 	ATA_STATIC_ID		# Static device numbering
+options 	ATA_STATIC_ID		# Static device numbering
 
 # SCSI peripherals
-#device		scbus			# SCSI bus (required for ATA/SCSI)
-#device		da			# Direct Access (disks)
-#device		cd			# CD
-#device		pass			# Passthrough device (direct ATA/SCSI access)
+device		scbus			# SCSI bus (required for ATA/SCSI)
+device		da			# Direct Access (disks)
+device		cd			# CD
+device		pass			# Passthrough device (direct ATA/SCSI access)
 
 # USB support
-#options 	USB_HOST_ALIGN=64	# Align usb buffers to cache line size.
-#options 	USB_DEBUG		# enable debug msgs
-#device		ehci			# EHCI USB interface
-#device		usb			# USB Bus (required)
-#device		umass			# Disks/Mass storage - Requires scbus and da
+options 	USB_HOST_ALIGN=64	# Align usb buffers to cache line size.
+options 	USB_DEBUG		# enable debug msgs
+device		ehci			# EHCI USB interface
+device		usb			# USB Bus (required)
+device		umass			# Disks/Mass storage - Requires scbus and da
 #device		uhid			# "Human Interface Devices"
 #device		u3g			# USB modems
 #device		ukbd			# Allow keyboard like HIDs to control console
@@ -145,12 +145,12 @@ device		mmcsd			# SDCard disk device
 #device		wlan_amrr		# AMRR transmit rate control algorithm
 
 # PCI
-#options 	NEW_PCIB
-#device 		pci
+options 	NEW_PCIB
+device 		pci
 
 # PCI Ethernet NICs that use the common MII bus controller code.
 # NOTE: Be sure to keep the 'device miibus' line in order to use these NICs!
-#device		re			# RealTek 8139C+/8169/8169S/8110S
+device 		alc
 
 # NOTE: serial console will be disabled if syscons enabled
 # Uncomment following lines for framebuffer/syscons support
@@ -161,9 +161,11 @@ device		mmcsd			# SDCard disk device
 
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
+device		fdt_phy
 device		fdt_pinctrl
 device		fdt_reset
-#device		fdt_phy
+device		fdt_regulator
+device		fdt_regulator_fixed
 options 	ARM_CLK_FRAMEWORK
 
 # SoC-specific devices
