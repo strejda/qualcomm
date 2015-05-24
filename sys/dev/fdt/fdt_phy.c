@@ -78,6 +78,41 @@ fdt_phy_status(device_t consumer, phy_t phy, int *value)
 }
 
 phy_t
+fdt_phy_get_by_property(device_t consumer, char *name)
+{
+	struct phy_handle *phy;
+	phandle_t cnode, phynode;
+	device_t phydev;
+	int rv;
+	intptr_t id;
+
+	/* Get data from FDT */
+
+	cnode = ofw_bus_get_node(consumer);
+	if (cnode <= 0)
+		return (NULL);
+	rv = OF_getencprop(cnode, name, &phynode, sizeof(phy));
+	if (rv <= 0)
+		return (NULL);
+
+	/* Tranlate provider to device */
+	phydev = OF_device_from_xref(phynode);
+	if (phydev == NULL) {
+		return (NULL);
+	}
+	/* Map phy to number */
+	rv = FDT_PHY_MAP(phydev, phynode, 0, NULL, &id);
+	if (rv != 0)
+		return (NULL);
+
+	/* Create handle */
+	phy = malloc(sizeof(struct phy_handle), M_OFWPROP, M_WAITOK);
+	phy->device =  phydev;
+	phy->phy_id = id;
+	return (phy);
+}
+
+phy_t
 fdt_phy_get_by_idx(device_t consumer, int idx)
 {
 	struct phy_handle *phy;

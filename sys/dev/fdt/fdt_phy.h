@@ -41,8 +41,8 @@ typedef struct phy_handle *phy_t;
  */
 phy_t fdt_phy_get_by_name(device_t consumer, char *name);
 phy_t fdt_phy_get_by_idx(device_t consumer, int idx);
+phy_t fdt_phy_get_by_property(device_t consumer, char *name);
 void fdt_phy_release(phy_t phy);
-
 
 /*
  * Enable/disable phy
@@ -50,7 +50,6 @@ void fdt_phy_release(phy_t phy);
 int fdt_phy_enable(device_t consumer, phy_t phy);
 int fdt_phy_disable(device_t consumer, phy_t phy);
 int fdt_phy_status(device_t consumer, phy_t phy, int *value);
-
 
 /*
  *  Helper function for quick enable
