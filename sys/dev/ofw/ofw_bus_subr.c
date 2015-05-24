@@ -630,19 +630,23 @@ ofw_bus_parse_xref_list_alloc(phandle_t node, char *list_name, char *cells_name,
 			break;
 		}
 
-		if (pcells < 1 || (i + pcells) > nelems) {
+		if ((i + pcells) > nelems) {
 			printf("Invalid %s property value <%d>\n", cells_name,
 			    pcells);
 			rv = ERANGE;
 			break;
 		}
 		if (cnt == idx) {
-			*cells= malloc(pcells * sizeof(**cells), M_OFWPROP,
-			    M_WAITOK);
 			*producer = pnode;
 			*ncells = pcells;
-			for (j = 0; j < pcells; j++)
-				(*cells)[j] = elems[i + j];
+			if (pcells != 0) {
+				*cells= malloc(pcells * sizeof(**cells),
+				    M_OFWPROP, M_WAITOK);
+				for (j = 0; j < pcells; j++)
+					(*cells)[j] = elems[i + j];
+			} else {
+				*cells = NULL;
+			}
 			rv = 0;
 			break;
 		}
