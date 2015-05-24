@@ -42,25 +42,51 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/clk/clk_mux.h>
 
+#include "clkdev_if.h"
+
 #define	WR4(_sc, off, val)						\
-	bus_write_4((_sc)->mem_res, off, val)
-#define	RD4(_sc, off)							\
-	bus_read_4((_sc)->mem_res, off);
-
-#define DEVICE_LOCK(_sc)      mtx_lock((_sc)->mtx)
-#define DEVICE_UNLOCK(_sc)    mtx_unlock((_sc)->mtx)
-
-static int clknode_mux_init(struct clknode *clk, device_t dev);
-static int clknode_mux_set_mux(struct clknode *clk, int idx);
+	CLKDEV_WRITE(clknode_get_device(_sc), off, val)
+#define	RD4(_sc, off, val)						\
+	CLKDEV_READ(clknode_get_device(_sc), off, val)
+#define	MD4(_sc, off, clr, set )					\
+	CLKDEV_MODIFY(clknode_get_device(_sc), off, clr, set)
 
 struct clknode_mux_sc {
-	struct mtx	*mtx;
-	struct resource *mem_res;
 	uint32_t	offset;
 	uint32_t	shift;
 	uint32_t	mask;
 	int		mux_flags;
 };
+
+static int
+clknode_mux_init(struct clknode *clk, device_t dev)
+{
+	uint32_t reg;
+	struct clknode_mux_sc *sc;
+
+	sc = clknode_get_softc(clk);
+
+	RD4(clk, sc->offset, &reg);
+	reg = (reg >> sc->shift) & sc->mask;
+//	printf("%s: %s (idx: %u)\n", __func__, clknode_get_name(clk), reg);
+	clknode_init_parent_idx(clk, reg);
+
+	return(0);
+}
+
+static int
+clknode_mux_set_mux(struct clknode *clk, int idx)
+{
+	struct clknode_mux_sc *sc;
+
+	sc = clknode_get_softc(clk);
+
+	MD4(clk, sc->offset, sc->mask << sc->shift,
+	    (idx & sc->mask) << sc->shift);
+//printf("%s: %s (idx: %u)\n", __func__, clknode_get_name(clk), idx);
+
+	return(0);
+}
 
 static clknode_method_t clknode_mux_methods[] = {
 	/* Device interface */
@@ -71,46 +97,8 @@ static clknode_method_t clknode_mux_methods[] = {
 DEFINE_CLASS_1(clknode_mux, clknode_mux_class, clknode_mux_methods,
    sizeof(struct clknode_mux_sc), clknode_class);
 
-
-static int
-clknode_mux_init(struct clknode *clk, device_t dev)
-{
-	uint32_t reg;
-	struct clknode_mux_sc *sc;
-
-	sc = clknode_get_softc(clk);
-
-	DEVICE_LOCK(sc);
-	reg = RD4(sc, sc->offset);
-	reg = (reg >> sc->shift) & sc->mask;
-//	printf("%s: %s (idx: %u)\n", __func__, clknode_get_name(clk), reg);
-	clknode_init_parent_idx(clk, reg);
-	DEVICE_UNLOCK(sc);
-	return(0);
-}
-
-static int
-clknode_mux_set_mux(struct clknode *clk, int idx)
-{
-	uint32_t reg;
-	struct clknode_mux_sc *sc;
-
-	sc = clknode_get_softc(clk);
-
-	DEVICE_LOCK(sc);
-	reg = RD4(sc, sc->offset);
-	reg &= ~(sc->mask << sc->shift);
-	reg |= (idx & sc->mask) << sc->shift;
-	WR4(sc, sc->offset, reg);
-	DEVICE_UNLOCK(sc);
-printf("%s: %s (idx: %u)\n", __func__, clknode_get_name(clk), idx);
-
-	return(0);
-}
-
 int
-clknode_mux_register(struct clkdom *clkdom, struct clk_mux_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+clknode_mux_register(struct clkdom *clkdom, struct clk_mux_def *clkdef)
 {
 	struct clknode *clk;
 	struct clknode_mux_sc *sc;
@@ -120,8 +108,6 @@ clknode_mux_register(struct clkdom *clkdom, struct clk_mux_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
 	sc->offset = clkdef->offset;
 	sc->shift = clkdef->shift;
 	sc->mask =  (1 << clkdef->width) - 1;

@@ -60,6 +60,7 @@ struct clkdom;
 typedef TAILQ_HEAD(clknode_list, clknode) clknode_list_t;
 typedef TAILQ_HEAD(clkdom_list, clkdom) clkdom_list_t;
 
+
 /* default clock methods */
 static int clknode_method_init(struct clknode *clk, device_t dev);
 static int clknode_method_recalc_freq(struct clknode *clk, uint64_t *freq);
@@ -90,39 +91,40 @@ struct clknode {
 	/*
 	 * Clock nodes hierarchy.
 	 */
-	struct clkdom 	*clkdom;	/* owning clock domain */
-	TAILQ_ENTRY(clknode) clkdom_e;	/* domain list entry */
+	struct clkdom		*clkdom;	/* owning clock domain */
+	TAILQ_ENTRY(clknode)	clkdom_e;	/* domain list entry */
+	TAILQ_ENTRY(clknode)	clknode_e;	/* global list entry */
 
-	const char	**parent_names;	/* array of parent names */
-	int		parents_num;	/* number of parents */
+	const char		**parent_names;	/* array of parent names */
+	int			parents_num;	/* number of parents */
 
-	int		parent_idx;	/* parent index or -1 */
-	struct clknode	**parents;	/* array of a parents */
-	struct clknode	*parent;	/* actual parent */
+	int			parent_idx;	/* parent index or -1 */
+	struct clknode		**parents;	/* array of a parents */
+	struct clknode		*parent;	/* actual parent */
 
-	clknode_list_t	children;	/* list of all childs */
-	TAILQ_ENTRY(clknode) childern_e; /* children list entry */
+	clknode_list_t		children;	/* list of all childs */
+	TAILQ_ENTRY(clknode)	childern_e; 	/* children list entry */
 
 	/*
 	 * Details of this device.
 	 */
-	const char	*name;		/* clock name */
-	intptr_t	id;		/* clock id */
-	int		flags;		/* CLK_FLAGS_  */
-	void		*softc;		/* instance variables */
-	struct sx	node_lock;	/* lock for this clock */
+	const char		*name;		/* clock name */
+	intptr_t		id;		/* clock id */
+	int			flags;		/* CLK_FLAGS_  */
+	void			*softc;		/* instance variables */
+	struct sx		node_lock;	/* lock for this clock */
 
-	uint64_t	freq;		/* actual frequency */
-	int		ref_cnt;	/* refereced counter */
-	int		enable_cnt;	/* enabled counter */
+	uint64_t		freq;		/* actual frequency */
+	int			ref_cnt;	/* refereced counter */
+	int			enable_cnt;	/* enabled counter */
 };
 
 /*
  *  Per consumer data. This structre is used as handle in consumer interface.
  */
 struct clk {
-	struct clknode	*clknode;
-	int		enable_cnt;
+	struct clknode		*clknode;
+	int			enable_cnt;
 };
 
 /*
@@ -130,10 +132,10 @@ struct clk {
  * clock device.
  */
 struct clkdom {
-	device_t 	device; 	/*link to device */
-	TAILQ_ENTRY(clkdom) link;	/* global domain list membership */
-	clknode_list_t	clknode_list;	/* all clocks list*/
-	struct sx	dom_lock;		/* shared lock for domain */
+	device_t		device;		/*link to device */
+	TAILQ_ENTRY(clkdom)	link_e;		/* global domain list enry */
+	clknode_list_t		clknode_list;	/* all clocks list*/
+	struct sx		dom_lock;	/* shared lock for domain */
 
 #ifdef FDT
 	clknode_ofw_map_t *ofw_mapper;
@@ -155,6 +157,9 @@ struct clkdom {
 /* List of all domains in kernel */
 static clkdom_list_t clkdom_list =
    TAILQ_HEAD_INITIALIZER(clkdom_list);
+/* List of all clocs in kernel */
+static clknode_list_t clknode_list =
+   TAILQ_HEAD_INITIALIZER(clknode_list);
 
 static void clknode_adjust_parent(struct clknode *clknode, int idx);
 
@@ -352,7 +357,7 @@ clknode_find_by_name(struct clkdom *clkdom, const char *name)
 {
 	struct clknode *entry, *tmp;
 
-	TAILQ_FOREACH_SAFE(entry, &clkdom->clknode_list, clkdom_e, tmp) {
+	TAILQ_FOREACH_SAFE(entry, &clknode_list, clknode_e, tmp) {
 		if (strcmp(entry->name, name) == 0)
 			return (entry);
 	}
@@ -385,7 +390,7 @@ clkdom_get_by_dev(const device_t dev)
 {
 	struct clkdom *entry, *tmp;
 
-	TAILQ_FOREACH_SAFE(entry, &clkdom_list, link, tmp) {
+	TAILQ_FOREACH_SAFE(entry, &clkdom_list, link_e, tmp) {
 		if (entry->device == dev)
 			return (entry);
 	}
@@ -430,7 +435,7 @@ clkdom_create(device_t dev)
 #ifdef FDT
 	clkdom->ofw_mapper = clknode_default_ofw_map;
 #endif
-	TAILQ_INSERT_TAIL(&clkdom_list, clkdom, link);
+	TAILQ_INSERT_TAIL(&clkdom_list, clkdom, link_e);
 #ifdef FDT
 	OF_device_register_xref(OF_xref_from_node(node), dev);
 #endif
@@ -587,6 +592,7 @@ clknode_register(struct clkdom * clkdom, struct clknode *clknode)
 	DOMAIN_XLOCK(clkdom);
 
 	TAILQ_INSERT_TAIL(&clkdom->clknode_list, clknode, clkdom_e);
+	TAILQ_INSERT_TAIL(&clknode_list, clknode, clknode_e);
 	DOMAIN_UNLOCK(clkdom);
 
 	return (clknode);
@@ -661,6 +667,7 @@ clknode_set_parent(struct clknode *clknode, int idx)
 	clknode_adjust_parent(clknode, idx);
 	rv = CLKNODE_SET_MUX(clknode, idx);
 	if (rv != 0) {
+printf("%s: failed for  %s\n", __func__, clknode->name);
 		clknode_adjust_parent(clknode, oldidx);
 		CLKNODE_UNLOCK(clknode);
 		return (rv);
@@ -900,6 +907,7 @@ clknode_enable(struct clknode *clknode)
 	}
 	clknode->enable_cnt++;
 	CLKNODE_UNLOCK(clknode);
+
 	return (0);
 }
 

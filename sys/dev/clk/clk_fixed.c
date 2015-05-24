@@ -42,11 +42,6 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/clk/clk_fixed.h>
 
-#define	WR4(_sc, off, val)						\
-	bus_write_4((_sc)->mem_res, off, val)
-#define	RD4(_sc, off)							\
-	bus_read_4((_sc)->mem_res, off);
-
 #define DEVICE_LOCK(_sc)      mtx_lock((_sc)->mtx)
 #define DEVICE_UNLOCK(_sc)    mtx_unlock((_sc)->mtx)
 
@@ -95,8 +90,7 @@ clknode_fixed_recalc(struct clknode *clk, uint64_t *freq)
 }
 
 int
-clknode_fixed_register(struct clkdom *clkdom, struct clk_fixed_def *clkdef,
-    struct mtx *dev_mtx)
+clknode_fixed_register(struct clkdom *clkdom, struct clk_fixed_def *clkdef)
 {
 	struct clknode *clk;
 	struct clknode_fixed_sc *sc;
@@ -108,7 +102,6 @@ clknode_fixed_register(struct clkdom *clkdom, struct clk_fixed_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
 	sc->fixed_flags = clkdef->fixed_flags;
 	sc->freq = clkdef->freq;
 	sc->mult = clkdef->mult;

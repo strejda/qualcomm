@@ -28,17 +28,18 @@
 #ifndef _DEV_CLK_MUX_H_
 #define _DEV_CLK_MUX_H_
 
+#include <machine/bus.h>
 #include <dev/clk/clk.h>
+#include "clkdev_if.h"
 
 struct clk_mux_def {
 	struct clknode_init_def clkdef;
-	uint32_t		offset;
+	bus_addr_t		offset;
 	uint32_t		shift;
 	uint32_t		width;
 	int			mux_flags;
 };
 
-int clknode_mux_register(struct clkdom *clkdom, struct clk_mux_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res);
+int clknode_mux_register(struct clkdom *clkdom, struct clk_mux_def *clkdef);
 
 #endif /* _DEV_CLK_MUX_H_ */

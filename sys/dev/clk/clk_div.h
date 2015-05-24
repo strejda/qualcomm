@@ -29,13 +29,15 @@
 #ifndef _DEV_CLK_DIV_H_
 #define _DEV_CLK_DIV_H_
 
+#include <machine/bus.h>
 #include <dev/clk/clk.h>
+#include "clkdev_if.h"
 
-#define CLK_DIV_ZERO_BASED	0x0001 /* Zero based divider */
+#define CLK_DIV_ZERO_BASED	0x0001 /* Zero == divide by 1 */
 
 struct clk_div_def {
 	struct clknode_init_def clkdef;
-	uint32_t		offset;
+	bus_addr_t		offset;
 	uint32_t		i_shift;
 	uint32_t		i_width;
 	uint32_t		f_shift;
@@ -43,7 +45,6 @@ struct clk_div_def {
 	int			div_flags;
 };
 
-int clknode_div_register(struct clkdom *clkdom, struct clk_div_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res);
+int clknode_div_register(struct clkdom *clkdom, struct clk_div_def *clkdef);
 
 #endif /*_DEV_CLK_DIV_H_*/

@@ -42,21 +42,17 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/clk/clk_gate.h>
 
+#include "clkdev_if.h"
+
 #define	WR4(_sc, off, val)						\
-	bus_write_4((_sc)->mem_res, off, val)
-#define	RD4(_sc, off)							\
-	bus_read_4((_sc)->mem_res, off);
+	CLKDEV_WRITE(clknode_get_device(_sc), off, val)
+#define	RD4(_sc, off, val)						\
+	CLKDEV_READ(clknode_get_device(_sc), off, val)
+#define	MD4(_sc, off, clr, set )					\
+	CLKDEV_MODIFY(clknode_get_device(_sc), off, clr, set)
 
-#define DEVICE_LOCK(_sc)      mtx_lock((_sc)->mtx)
-#define DEVICE_UNLOCK(_sc)    mtx_unlock((_sc)->mtx)
-
-
-static int clknode_gate_init(struct clknode *clk, device_t dev);
-static int clknode_gate_set_gate(struct clknode *clk, int enable);
 struct clknode_gate_sc {
-	struct mtx	*mtx;
-	struct resource *mem_res;
-	uint32_t	offset;
+	bus_addr_t	offset;
 	uint32_t	shift;
 	uint32_t	mask;
 	uint32_t	on_value;
@@ -65,15 +61,6 @@ struct clknode_gate_sc {
 	int		ungated;
 };
 
-static clknode_method_t clknode_gate_methods[] = {
-	/* Device interface */
-	CLKNODEMETHOD(clknode_init,	clknode_gate_init),
-	CLKNODEMETHOD(clknode_set_gate,	clknode_gate_set_gate),
-	CLKNODEMETHOD_END
-};
-DEFINE_CLASS_1(clknode_gate, clknode_gate_class, clknode_gate_methods,
-   sizeof(struct clknode_gate_sc), clknode_class);
-
 static int
 clknode_gate_init(struct clknode *clk, device_t dev)
 {
@@ -81,12 +68,10 @@ clknode_gate_init(struct clknode *clk, device_t dev)
 	struct clknode_gate_sc *sc;
 
 	sc = clknode_get_softc(clk);
-	DEVICE_LOCK(sc);
-	reg = RD4(sc, sc->offset);
+	RD4(clk, sc->offset, &reg);
 	reg = (reg >> sc->shift) & sc->mask;
 	sc->ungated = reg == sc->on_value ? 1 : 0;
 //	printf("%s: %s (gate: %u)\n", __func__, clknode_get_name(clk), sc->ungated);
-	DEVICE_UNLOCK(sc);
 	clknode_init_parent_idx(clk, 0);
 	return(0);
 }
@@ -98,20 +83,24 @@ clknode_gate_set_gate(struct clknode *clk, int enable)
 	struct clknode_gate_sc *sc;
 
 	sc = clknode_get_softc(clk);
-	DEVICE_LOCK(sc);
 	sc->ungated = enable;
-	reg = RD4(sc, sc->offset);
-	reg &= ~(sc->mask << sc->shift);
-	reg |= (sc->ungated ? sc->on_value : sc->off_value) << sc->shift;
-	WR4(sc, sc->offset, reg);
-	DEVICE_UNLOCK(sc);
-	clknode_init_parent_idx(clk, 0);
+	reg = (sc->ungated ? sc->on_value : sc->off_value) << sc->shift;
+	MD4(clk, sc->offset, sc->mask << sc->shift, reg);
+
 	return(0);
 }
 
+static clknode_method_t clknode_gate_methods[] = {
+	/* Device interface */
+	CLKNODEMETHOD(clknode_init,	clknode_gate_init),
+	CLKNODEMETHOD(clknode_set_gate,	clknode_gate_set_gate),
+	CLKNODEMETHOD_END
+};
+DEFINE_CLASS_1(clknode_gate, clknode_gate_class, clknode_gate_methods,
+   sizeof(struct clknode_gate_sc), clknode_class);
+
 int
-clknode_gate_register(struct clkdom *clkdom, struct clk_gate_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+clknode_gate_register(struct clkdom *clkdom, struct clk_gate_def *clkdef)
 {
 	struct clknode *clk;
 	struct clknode_gate_sc *sc;
@@ -121,8 +110,6 @@ clknode_gate_register(struct clkdom *clkdom, struct clk_gate_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
 	sc->offset = clkdef->offset;
 	sc->shift = clkdef->shift;
 	sc->mask =  clkdef->mask;

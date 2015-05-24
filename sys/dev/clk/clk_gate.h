@@ -29,11 +29,13 @@
 #ifndef _DEV_CLK_GATE_H_
 #define _DEV_CLK_GATE_H_
 
+#include <machine/bus.h>
 #include <dev/clk/clk.h>
+#include "clkdev_if.h"
 
 struct clk_gate_def {
 	struct clknode_init_def clkdef;
-	uint32_t		offset;
+	bus_addr_t		offset;
 	uint32_t		shift;
 	uint32_t		mask;
 	uint32_t		on_value;
@@ -41,7 +43,6 @@ struct clk_gate_def {
 	int			gate_flags;
 };
 
-int clknode_gate_register(struct clkdom *clkdom, struct clk_gate_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res);
+int clknode_gate_register(struct clkdom *clkdom, struct clk_gate_def *clkdef);
 
 #endif /* _DEV_CLKGATE_H_ */

@@ -39,7 +39,6 @@ struct clk_fixed_def {
 	int			fixed_flags;
 };
 
-int clknode_fixed_register(struct clkdom *clkdom, struct clk_fixed_def *clkdef,
-    struct mtx *dev_mtx);
+int clknode_fixed_register(struct clkdom *clkdom, struct clk_fixed_def *clkdef);
 
 #endif /*_DEV_CLK_FIXED_H_*/

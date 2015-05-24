@@ -42,13 +42,12 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/clk/clk_div.h>
 
-#define	WR4(_sc, off, val)						\
-	bus_write_4((_sc)->mem_res, off, val)
-#define	RD4(_sc, off)							\
-	bus_read_4((_sc)->mem_res, off);
+#include "clkdev_if.h"
 
-#define DEVICE_LOCK(_sc)      mtx_lock((_sc)->mtx)
-#define DEVICE_UNLOCK(_sc)    mtx_unlock((_sc)->mtx)
+#define	WR4(_sc, off, val)						\
+	CLKDEV_WRITE(clknode_get_device(_sc), off, val)
+#define	RD4(_sc, off, val)							\
+	CLKDEV_READ(clknode_get_device(_sc), off, val)
 
 static int clknode_div_init(struct clknode *clk, device_t dev);
 static int clknode_div_recalc(struct clknode *clk, uint64_t *req);
@@ -56,9 +55,7 @@ static int clknode_div_set_freq(struct clknode *clknode, uint64_t fin,
     uint64_t *fout, uint64_t *prec, int *stop);
 
 struct clknode_div_sc {
-	struct mtx	*mtx;
-	struct resource *mem_res;
-	uint32_t	offset;
+	bus_addr_t	offset;
 	uint32_t	i_shift;
 	uint32_t	i_mask;
 	uint32_t	i_width;
@@ -69,16 +66,6 @@ struct clknode_div_sc {
 	uint32_t	divider;	/* in natural form */
 };
 
-static clknode_method_t clknode_div_methods[] = {
-	/* Device interface */
-	CLKNODEMETHOD(clknode_init,		clknode_div_init),
-	CLKNODEMETHOD(clknode_recalc_freq,	clknode_div_recalc),
-	CLKNODEMETHOD(clknode_set_freq,		clknode_div_set_freq),
-	CLKNODEMETHOD_END
-};
-DEFINE_CLASS_1(clknode_div, clknode_div_class, clknode_div_methods,
-   sizeof(struct clknode_div_sc), clknode_class);
-
 static int
 clknode_div_init(struct clknode *clk, device_t dev)
 {
@@ -88,15 +75,13 @@ clknode_div_init(struct clknode *clk, device_t dev)
 
 	sc = clknode_get_softc(clk);
 
-	DEVICE_LOCK(sc);
-	reg = RD4(sc, sc->offset);
+	RD4(clk, sc->offset, &reg);
 	i_div = (reg >> sc->i_shift) & sc->i_mask;
 	if (!(sc->div_flags & CLK_DIV_ZERO_BASED))
 		i_div++;
 	f_div = (reg >> sc->f_shift) & sc->f_mask;
 	sc->divider = i_div << sc->f_width | f_div;
 //printf("%s: %s (div: %u) - 0x%08X\n", __func__, clknode_get_name(clk), sc->divider, reg);
-	DEVICE_UNLOCK(sc);
 	clknode_init_parent_idx(clk, 0);
 	return(0);
 }
@@ -130,9 +115,18 @@ clknode_div_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	return (0);
 }
 
+static clknode_method_t clknode_div_methods[] = {
+	/* Device interface */
+	CLKNODEMETHOD(clknode_init,		clknode_div_init),
+	CLKNODEMETHOD(clknode_recalc_freq,	clknode_div_recalc),
+	CLKNODEMETHOD(clknode_set_freq,		clknode_div_set_freq),
+	CLKNODEMETHOD_END
+};
+DEFINE_CLASS_1(clknode_div, clknode_div_class, clknode_div_methods,
+   sizeof(struct clknode_div_sc), clknode_class);
+
 int
-clknode_div_register(struct clkdom *clkdom, struct clk_div_def *clkdef,
-    struct mtx *dev_mtx, struct resource *mem_res)
+clknode_div_register(struct clkdom *clkdom, struct clk_div_def *clkdef)
 {
 	struct clknode *clk;
 	struct clknode_div_sc *sc;
@@ -142,8 +136,6 @@ clknode_div_register(struct clkdom *clkdom, struct clk_div_def *clkdef,
 		return (1);
 
 	sc = clknode_get_softc(clk);
-	sc->mtx = dev_mtx;
-	sc->mem_res = mem_res;
 	sc->offset = clkdef->offset;
 	sc->i_shift = clkdef->i_shift;
 	sc->i_width = clkdef->i_width;
