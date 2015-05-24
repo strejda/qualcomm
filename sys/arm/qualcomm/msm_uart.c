@@ -63,7 +63,7 @@ struct msm_uart_softc {
 	uint32_t		ier;
 	int			last_rx_cnt;
 	uint32_t		readbuf;
-	uint32_t		readcnt;
+	int			readcnt;
 };
 
 /*
@@ -138,7 +138,10 @@ msm_uart_uart_param(struct uart_bas *bas, int baudrate, int databits,
 static int
 msm_uart_probe(struct uart_bas *bas)
 {
+	struct msm_uart_softc *sc = (struct msm_uart_softc *)bas;
 
+	sc->readbuf = 0;
+	sc->readcnt = 0;
 	return (0);
 }
 
@@ -276,11 +279,12 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 		uart_unlock(mtx);
 		return (c);
 	}
+
 	/* Whole word is in FIFO */
 	if (RD4(bas, UART_DM_SR) & UART_DM_SR_RXRDY) {
 		/* Read buffer */
 		sc->readbuf = RD4(bas, UART_DM_RF(0));
-		c = (sc->readbuf & 0xFF );
+		c = (sc->readbuf & 0xFF);
 		sc->readcnt = 4;
 		sc->readbuf >>= 8;
 		sc->readcnt--;
@@ -288,6 +292,7 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 		uart_unlock(mtx);
 		return (c);
 	}
+
 	/* Check packing buffer last */
 	do {
 		sc->readcnt = UART_DM_RXFS_BUF_STATE(RD4(bas, UART_DM_RXFS));
@@ -295,6 +300,7 @@ msm_uart_getc(struct uart_bas *bas, struct mtx *mtx)
 
 	/* Force stale event */
 	WR4(bas, UART_DM_CR, UART_DM_CR_FORCE_STALE_EVENT);
+
 	/* Read buffer */
 	sc->readbuf = RD4(bas, UART_DM_RF(0));
 	c = (sc->readbuf & 0xFF);
