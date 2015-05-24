@@ -55,6 +55,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/intr.h>
 
 #include <dev/clk/clk.h>
+#include <dev/fdt/fdt_pinctrl.h>
+#include <dev/fdt/fdt_regulator.h>
+#include <dev/gpio/gpiobusvar.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -64,13 +67,25 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/qualcomm/mmci.h>
 
-#define	DEBUG	1
+#define	LOCK(_sc)	mtx_lock(&_sc->mtx);
+#define	UNLOCK(_sc)	mtx_unlock(&_sc->mtx);
 
+#define	RD4(_sc, _r)	bus_read_4(_sc->mem_res, _r)
+#define	WR4(_sc, _r, _v) bus_write_4(_sc->mem_res, _r, _v)
+
+#define	PENDING_CMD	0x01
+#define	PENDING_STOP	0x02
+#define	CARD_INIT_DONE	0x04
+
+
+#define	DEBUG	1
 #ifdef DEBUG
-#define debugf(fmt, args...) do { printf("%s(): ", __func__);   \
-    printf(fmt,##args); } while (0)
+static int dbg_lvl = 0;
+#define debugf(d, fmt, args...) do { 					\
+  if (dbg_lvl >= (d)) printf("%s(): " # fmt, __func__, ##args); 	\
+} while (0)
 #else
-#define debugf(fmt, args...)
+#define debugf(d, fmt, args...)
 #endif
 
 struct mmci_softc {
@@ -82,375 +97,368 @@ struct mmci_softc {
 	clk_t			mclk;
 	clk_t			pclk;
 	int			clk_freq;
-	
+	regulator_t		supply_vmmc;
+	struct gpiobus_pin	*gpio_cd;
+	int			use_pio;
+	uint32_t		max_freq;
+	int			not_removable;
+
 	struct mmc_host		host;
 	struct mmc_request 	*req;
-	uint32_t		fdt_caps;
-	uint32_t		pwrup_cmd;
-	int			use_pio;
+	struct mmc_command	*cmd;
+	int			flags;
 	int			bus_busy;
+
+	/* Flags for handling R1b type respose */
+	int			prog_enabled;
+	int			got_progdone;	/* PROG_DONE received */
+	int			got_respend;	/* CMD_RESP_END received */
+
+	/* Flags for handling data transfer done */
+	int			got_data_done;	/* data transfer finished */
+	int			got_dataend;	/* DATA_DONE received */
 };
 
-#define	MCI_MAX_BLOCKSIZE	4096
+/*
+ * Wait until cwrite to register passes multiple clock domains. Worst fly
+ * time is 3 MCLK and 3 HCLK
+ */
+static void
+mmci_reg_wait(struct mmci_softc *sc)
+{
+	while((RD4(sc, MCI_STATUS2) & MCI_STATUS2_MCLK_REG_WR_ACTIVE) != 0)
+		;
+}
 
-static int mmci_probe(device_t);
-static int mmci_attach(device_t);
-static int mmci_detach(device_t);
-static void mmci_intr(void *);
-
-static void mmci_setup_xfer(struct mmci_softc *, struct mmc_data *);
-
-static int mmci_update_ios(device_t, device_t);
-static int mmci_request(device_t, device_t, struct mmc_request *);
-static int mmci_get_ro(device_t, device_t);
-static int mmci_acquire_host(device_t, device_t);
-static int mmci_release_host(device_t, device_t);
-
-#define	mmci_lock(_sc)						\
-    mtx_lock(&_sc->mtx);
-#define	mmci_unlock(_sc)						\
-    mtx_unlock(&_sc->mtx);
-
-#define	RD4(_sc, _reg)					\
-    bus_read_4(_sc->mem_res, _reg)
-
-#define	WR4(_sc, _reg, _value)				\
-    bus_write_4(_sc->mem_res, _reg, _value)
-
-static int abc = 27000;
-
+/*
+ * PIO transfers
+ */
 static void
 mmci_pio_read(struct mmci_softc *sc, struct mmc_command *cmd)
 {
 	struct mmc_data *data;
-	uint32_t *p, status;
-
-	if (cmd == NULL || cmd->data == NULL)
-		return;
+	uint32_t status;
+	uintptr_t p;
+	int len;
 
 	data = cmd->data;
-	if ((data->flags & MMC_DATA_READ) == 0)
-		return;
-
+	p = (uintptr_t)data->data + data->xfer_len;
+	KASSERT((data->flags & MMC_DATA_READ) != 0,
+	    ("read on not read requrest"));
 	KASSERT((data->xfer_len & 3) == 0, ("xfer_len not aligned"));
-	p = (uint32_t *)data->data + (data->xfer_len >> 2);
 
 	while (data->xfer_len < data->len) {
 		status = RD4(sc, MCI_STATUS);
-		if ((status & (MCI_SCM_RXDATAAVLBL | MCI_SCM_RXFIFOHALFFULL | MCI_SCM_RXFIFOFULL)) == 0)
+		if (status & MCI_SCM_RXFIFO_FULL) {
+			len = min(data->len - data->xfer_len,
+			    MCI_FIFO_SIZE);
+			bus_read_multi_4(sc->mem_res, MCI_FIFO, (uint32_t *)p,
+			    len / 4);
+			p += len;
+			data->xfer_len += len;
+		} else if (status & MCI_SCM_RXFIFO_HALF_FULL) {
+			len = min(data->len - data->xfer_len,
+			    MCI_FIFO_SIZE /2);
+			bus_read_multi_4(sc->mem_res, MCI_FIFO, (uint32_t *)p,
+			    len / 4);
+			p += len;
+			data->xfer_len += len;
+		} else if (status & MCI_SCM_RXDATA_AVLBL) {
+			*(uint32_t *)p = RD4(sc, MCI_FIFO);
+			p += 4;
+			data->xfer_len += 4;
+		} else {
 			break;
-		*p++ = RD4(sc, MCI_FIFO);
-		data->xfer_len += 4;
+		}
 	}
-	if (data->xfer_len >= data->len)
-		WR4(sc, MCI_MASK0, MCI_IRQENABLE | MCI_SCM_DATAEND);
 
-//debugf("pio read: len: %d, xfer_len: %d\n", data->len, data->xfer_len  );
+	if (data->xfer_len >= data->len)
+		WR4(sc, MCI_MASK0, RD4(sc, MCI_MASK0) & ~MCI_IRQ_FIFO);
+	else if ((data->len - data->xfer_len) < 16)
+		WR4(sc, MCI_MASK0, (RD4(sc, MCI_MASK0) | MCI_SCM_RXDATA_AVLBL));
 }
 
 static void
 mmci_pio_write(struct mmci_softc *sc, struct mmc_command *cmd)
 {
 	struct mmc_data *data;
-	uint32_t *p, status;
-
-	if (cmd == NULL || cmd->data == NULL)
-		return;
+	uint32_t status;
+	uintptr_t p;
+	int len, maxlen;
 
 	data = cmd->data;
-	if ((data->flags & MMC_DATA_WRITE) == 0)
-		return;
-
+	p = (uintptr_t)data->data + data->xfer_len;
+	KASSERT((data->flags & MMC_DATA_WRITE) != 0,
+	    ("write on not write requrest"));
 	KASSERT((data->xfer_len & 3) == 0, ("xfer_len not aligned"));
-	p = (uint32_t *)data->data + (data->xfer_len >> 2);
-if (abc == 0)
-debugf("pio write1: len: %d, xfer_len: %d, %d\n", data->len, data->xfer_len,  RD4(sc, MCI_FIFOCNT));
 
 	while (data->xfer_len < data->len) {
 		status = RD4(sc, MCI_STATUS);
-//		if ((status & MCI_SCM_TXFIFOHALFEMPTY) == 0)
-		if ((status & MCI_SCM_TXFIFOEMPTY) == 0)
+
+		if (status & MCI_SCM_TXFIFO_EMPTY)
+			maxlen = MCI_FIFO_SIZE;
+		else if (status & MCI_SCM_TXFIFO_HALF_EMPTY)
+			maxlen = MCI_FIFO_SIZE / 2;
+		else
 			break;
-		WR4(sc, MCI_FIFO, *p++);
-		data->xfer_len += 4;
+
+		len = min(data->len - data->xfer_len, maxlen);
+		bus_write_multi_4(sc->mem_res, MCI_FIFO, (uint32_t *)p,
+			    len / 4);
+		p += len;
+		data->xfer_len += len;
 	}
+
 	if (data->xfer_len >= data->len)
-		WR4(sc, MCI_MASK0, MCI_IRQENABLE | MCI_SCM_DATAEND);
-if (abc == 0)
-debugf("pio write2: len: %d, xfer_len: %d, %d\n", data->len, data->xfer_len,  RD4(sc, MCI_FIFOCNT));
+		WR4(sc, MCI_MASK0, RD4(sc, MCI_MASK0) & ~MCI_IRQ_FIFO);
 }
 
+/* Handle single MMC command */
 static void
-mmci_setup_xfer(struct mmci_softc *sc, struct mmc_data *data)
+mmci_start_cmd(struct mmci_softc *sc, struct mmc_command *cmd)
 {
+	struct mmc_data *data;
+	uint32_t blksz;
+	uint32_t cmdreg;
 	uint32_t datactrl, mask;
 
-//if (!(data->flags & MMC_DATA_READ))
-//abc = 0;
-	
-if (abc == 0)
-debugf("data: %p, len: %d, %s\n", data,
-	    data->len, (data->flags & MMC_DATA_READ) ? "read" : "write");
+	sc->prog_enabled =0;
+	sc->got_progdone = 0;
+	sc->got_respend = 0;
+	sc->got_data_done = 0;
+	sc->got_dataend = 0;
 
-	if (data->flags & MMC_DATA_READ) {
-		datactrl = MCI_DATA_CTL_READ;
-	}
+	sc->cmd = cmd;
+	mask = MCI_IRQENABLE;
+	cmdreg = cmd->opcode | MCI_CMD_ENABLE;
+	data = cmd->data;
+	datactrl = 0;
 
-	if (data->flags & MMC_DATA_WRITE) {
-		datactrl = MCI_DATA_CTL_WRITE;
-	}
+	if (((cmd->flags & MMC_CMD_MASK) == MMC_CMD_ADTC) &&
+	    ((cmd->data == NULL) || (cmd->data->data == NULL)))
+		panic("Data transfer requested without buffer");
 
+	/* Stop controller */
+	WR4(sc, MCI_CMD, 0);
+	mmci_reg_wait(sc);
+	WR4(sc, MCI_DATA_CTL, 0);
+	mmci_reg_wait(sc);
+	WR4(sc, MCI_CLEAR, 0xFFFFFFFF);
 
-//	datactrl |= MCI_DATACTRL_DMAENABLE | MCI_DATACTRL_ENABLE;
-	datactrl |= MCI_DATA_CTL_ENABLE;
-//	datactrl |= (ffs(data->len) - 1) << 4;
-	datactrl |= data->len << 4;
-
-	if (data->flags & MMC_DATA_READ) {
-		mask = MCI_SCM_RXFIFOHALFFULL;
-
-		/*
-		 * If we have less than the fifo 'half-full' threshold to
-		 * transfer, trigger a PIO interrupt as soon as any data
-		 * is available.
-		 */
-		//if (data->len < 16)
-			mask |= MCI_SCM_RXDATAAVLBL;
-	} else {
-		/*
-		 * We don't actually need to include "FIFO empty" here
-		 * since its implicit in "FIFO half empty".
-		 */
-		mask = 0 ;// MCI_SCM_TXFIFOHALFEMPTY;
-	}
-
-	WR4(sc, MCI_DATATIMER, 0xFFFF0000);
-	WR4(sc, MCI_DATALENGTH, data->len);
-	WR4(sc, MCI_DATA_CTL, datactrl);
-
-	WR4(sc, MCI_MASK0, (RD4(sc, MCI_MASK0) | mask));
-
-if (abc == 0)	
-	debugf("datactrl: 0x%08x 0x%08x 0x%08x\n", RD4(sc, MCI_DATA_CTL),  RD4(sc, MCI_DATALENGTH),  RD4(sc, MCI_MASK0));
-//debugf("mask: 0x%08x 0x%08x\n", RD4(sc, MCI_MASK0), mask);
-}
-
-static void
-mmci_xfer_done(struct mmci_softc *sc)
-{
-if (abc == 0)	
- debugf("mmci_xfer_done\n");
-	WR4(sc, MCI_MASK0, MCI_IRQENABLE);
-	if (sc->req) {
-		sc->req->done(sc->req);
-		sc->req = NULL;
-	}
-}
-
-
-static void
-mmci_data_irq(struct mmci_softc *sc, uint32_t status)
-{
-	struct mmc_command *cmd;
-	
-
-	/* Check for stray interrupts first */
-	if (sc->req == NULL) {
-		device_printf(sc->dev, "Stray data interrupt: 0x%08X\n",
-		    status);
-		return;
-	}
-	if (sc->req->cmd->data == NULL)
-		return;
-	
-	cmd = sc->req->cmd;
-	/* First check for data errors */
-	if (status & (MCI_SCM_DATACRCFAIL | MCI_SCM_DATATIMEOUT |
-		      MCI_SCM_STARTBITERR | MCI_SCM_TXUNDERRUN |
-		      MCI_SCM_RXOVERRUN)) {
-		      	
-		debugf("Data error: 0x%08X\n", status);
-		if (sc->use_pio == 0) {
-			/* XXXX Abort  DMA if active*/
-		}
-		
-
-		if (status & MCI_SCM_DATATIMEOUT) {
-			cmd->error = MMC_ERR_TIMEOUT;
-		} else if (status & MCI_SCM_DATACRCFAIL) {
-			cmd->error = MMC_ERR_BADCRC;
-		} else if (status & (MCI_SCM_TXUNDERRUN | MCI_SCM_RXOVERRUN)) {
-			cmd->error = MMC_ERR_FIFO;
-		} else {
-			cmd->error = MMC_ERR_FAILED;
-		}
-		mmci_xfer_done(sc);
-		return;
-	}
-
-//	if (status & MCI_SCM_DATABLOCKEND)
-//		device_printf(sc->dev, "Stray data block end interrupt\n");
-
-
-	if (status & MCI_SCM_DATAEND || cmd->error) {
-		if (sc->use_pio == 0) {
-			/* XXXX Finish  DMA if active*/
-		}		
-		mmci_xfer_done(sc);
-	}
-}
-
-
-static void
-mmci_intr(void *arg)
-{
-	struct mmci_softc *sc = (struct mmci_softc *)arg;
-	struct mmc_command *cmd;
-	uint32_t status, status1, mask;
-
-	status1 = RD4(sc, MCI_STATUS);
-	mask = RD4(sc, MCI_MASK0);
-	status = status1 & mask;
-	WR4(sc, MCI_CLEAR, status);
-//debugf("interrupt: 0x%08x 0x%08x\n", status, status1);
-if (abc == 0)
-  debugf("interrupt: 0x%08x 0x%08x\n", status, status1);
-	if (sc->req == NULL) {
-		debugf("Stray interrupt: 0x%08x\n", status);
-		WR4(sc, MCI_CLEAR, status);
-		return;
-	}
-	
-	if (status & (MCI_SCM_TXFIFOHALFEMPTY | MCI_SCM_RXDATAAVLBL | MCI_SCM_RXFIFOFULL)) {
-if (abc == 0)
-debugf(" data interrupt: 0x%08x  0x%08x  0x%08x\n", status1, status1 & MCI_SCM_RXACTIVE, status1 & MCI_SCM_TXACTIVE);
-		cmd = sc->req->cmd;
-		if (status1 & MCI_SCM_RXACTIVE)
-			mmci_pio_read(sc, cmd);
-		if (status1 & MCI_SCM_TXACTIVE)
-			mmci_pio_write(sc, cmd);	
-	}
-
-	mmci_data_irq(sc, status);
-	
-	if (sc->req == NULL)
-		return;
-	
-	if (status & MCI_SCM_CMDCRCFAIL) {
-		debugf("command crc fail\n");
-		cmd = sc->req->cmd;
-		cmd->error = cmd->flags & MMC_RSP_CRC
-		    ? MMC_ERR_BADCRC : MMC_ERR_NONE;
-		cmd->resp[0] = RD4(sc, MCI_RESP0);
-		mmci_xfer_done(sc);
-
-	} else if (status & MCI_SCM_CMDTIMEOUT) {
-		debugf("command timeout\n");
-		cmd = sc->req->cmd;
-		cmd->error = MMC_ERR_TIMEOUT;
-		cmd->resp[0] = RD4(sc, MCI_RESP0);
-		mmci_xfer_done(sc);
-	} else  if (status & MCI_SCM_CMDRESPEND) {
-		cmd = sc->req->cmd;
-if (abc == 0)
-		debugf("command response: %p\n", cmd->data);
-
-		
-		if (cmd->flags & MMC_RSP_136) {
-			cmd->resp[3] = RD4(sc, MCI_RESP3);
-			cmd->resp[2] = RD4(sc, MCI_RESP2);
-			cmd->resp[1] = RD4(sc, MCI_RESP1);
-		}
-
-		cmd->resp[0] = RD4(sc, MCI_RESP0);
-		cmd->error = MMC_ERR_NONE;
-	
-		if (cmd->data && (cmd->data->flags & MMC_DATA_WRITE))
-		    WR4(sc, MCI_MASK0, (RD4(sc, MCI_MASK0) | MCI_SCM_TXFIFOHALFEMPTY));
-	
-
-		if (!cmd->data)
-			mmci_xfer_done(sc);
-
-	} else if (status & MCI_SCM_CMDSENT) {
-if (abc == 0)
-		debugf("command sent\n");
-		cmd = sc->req->cmd;
-		cmd->error = MMC_ERR_NONE;
-		if (!cmd->data) 
-			mmci_xfer_done(sc);
-	}
-
-WR4(sc, MCI_CLEAR, status);
-		
-if (abc == 0)
-	debugf("done: 0x%08x 0x%08x)\n",  RD4(sc, MCI_STATUS), RD4(sc, MCI_MASK0));
-
-}
-
-
-static void
-mmci_cmd(struct mmci_softc *sc, struct mmc_command *cmd)
-{
-	uint32_t cmdreg = 0;
-
-	if (RD4(sc, MCI_COMMAND) & MCI_COMMAND_ENABLE) {
-		WR4(sc, MCI_COMMAND, 0);
-		DELAY(1000);
-	}
-
-
-	cmdreg |= (cmd->opcode | MCI_COMMAND_ENABLE);
-
-	if (cmd->flags & MMC_RSP_PRESENT) {
+	/* Build cmdreg value */
+	if (MMC_RSP(cmd->flags) != MMC_RSP_NONE) {
+		cmdreg |= MCI_CMD_RESPONSE;
 		if (cmd->flags & MMC_RSP_136)
-			cmdreg |= MCI_COMMAND_LONGRSP;
-		cmdreg |= MCI_COMMAND_RESPONSE;
+			cmdreg |= MCI_CMD_LONGRSP;
+	}
+	if (cmd->flags & MMC_CMD_ADTC)
+		cmdreg |= MCI_CMD_QCOM_DAT_CMD;
+	if (MMC_RSP(cmd->flags) == MMC_RSP_R1B)
+	{
+		sc->prog_enabled = 1;
+		cmdreg |= MCI_CMD_QCOM_PROG_ENA;
+		mask |= MCI_SCM_PROG_DONE;
 	}
 
+	/* Setup data registers and interrupt mask */
+	if ((cmd->flags & MMC_CMD_MASK) == MMC_CMD_ADTC) {
+		datactrl = MCI_DATA_CTL_ENABLE;
 
-	if (cmd->flags & MMC_CMD_ADTC)
-		/* XXXX - implementation specific */
-		cmdreg |= MCI_COMMAND_QCOM_DAT_CMD;
-if (abc == 0)	
-	debugf("cmd: %d, flag: 0x%08X,  arg: 0x%08x, cmdreg: 0x%08x, \n", cmd->opcode, cmd->flags, cmd->arg, cmdreg);
+		if (data->flags & MMC_DATA_READ)
+			datactrl |= MCI_DATA_CTL_READ;
+		else /* For write, start DPSM after command is send */
+			datactrl |= MCI_DATA_CTL_QCOM_DATA_PEND;
 
+		if (data->flags & MMC_DATA_STREAM)
+			datactrl |= MCI_DATA_CTL_MODE;
+
+		blksz = (data->len < MMC_SECTOR_SIZE) ? \
+			 data->len : MMC_SECTOR_SIZE;
+		datactrl |= blksz << 4;
+
+		if (data->flags & MMC_DATA_READ) {
+			mask |= MCI_SCM_RXFIFO_HALF_FULL;
+			if (data->len < 16)
+				mask |= MCI_SCM_RXDATA_AVLBL;
+		} else {
+			mask |= MCI_SCM_TXFIFO_HALF_EMPTY;
+		}
+
+		mask |= MCI_SCM_DATAEND;
+
+		/* XXXX FIXME Compute valid value ? */
+		WR4(sc, MCI_DATATIMER, 0xFFFF0000);
+		WR4(sc, MCI_DATALENGTH, data->len);
+		WR4(sc, MCI_DATA_CTL, datactrl);
+		mmci_reg_wait(sc);
+	} else   {
+		mask |= MCI_SCM_CMD_SENT | MCI_SCM_CMD_RESP_END;
+	}
+
+	debugf(2, "cmd: %d, flag: 0x%08X,  arg: 0x%08x, cmdreg: 0x%08x,"
+	    "datactrl: 0x%08x, mask: 0x%08x, data: %p\n", cmd->opcode,
+	    cmd->flags, cmd->arg, cmdreg, datactrl, mask, data);
+
+	/* Fire up command */
 	WR4(sc, MCI_ARGUMENT, cmd->arg);
-	WR4(sc, MCI_COMMAND, cmdreg);
+	WR4(sc, MCI_CMD, cmdreg);
+	WR4(sc, MCI_MASK0, (RD4(sc, MCI_MASK0) | mask));
+	mmci_reg_wait(sc);
 }
 
+/* Handle single MMC request */
+static void
+mmci_next_cmd(struct mmci_softc *sc)
+{
+	struct mmc_request *req;
 
+	WR4(sc, MCI_MASK0, MCI_IRQENABLE);
+	WR4(sc, MCI_STATUS, MCI_IRQENABLE);
+	WR4(sc, MCI_CMD, 0);
+	mmci_reg_wait(sc);
+
+	sc->cmd = NULL;
+	req = sc->req;
+	if (req == NULL)
+		return;
+
+	if (sc->flags & PENDING_CMD) {
+		sc->flags &= ~PENDING_CMD;
+		mmci_start_cmd(sc, req->cmd);
+		return;
+	}
+	if (sc->flags & PENDING_STOP) {
+		sc->flags &= ~PENDING_STOP;
+		mmci_start_cmd(sc, req->stop);
+		return;
+	}
+
+	/* Request finished */
+	sc->req = NULL;
+	req->done(req);
+}
 
 static int
 mmci_request(device_t bus, device_t child, struct mmc_request *req)
 {
 	struct mmci_softc *sc = device_get_softc(bus);
 
-//	debugf("request: %p\n", req);
-	mmci_lock(sc);
+	LOCK(sc);
 	if (sc->req) {
-		mmci_unlock(sc);
+		UNLOCK(sc);
 		return (EBUSY);
 	}
 	sc->req = req;
+	sc->flags |= PENDING_CMD;
+	if (sc->req->stop)
+		sc->flags |= PENDING_STOP;
 
-	if (req->cmd->data)
-		mmci_setup_xfer(sc, req->cmd->data);
+	mmci_next_cmd(sc);
 
-	mmci_cmd(sc, req->cmd);
-	
-	mmci_unlock(sc);
+	UNLOCK(sc);
 
 	return (0);
 }
 
+static void
+mmci_intr(void *arg)
+{
+	struct mmci_softc *sc = (struct mmci_softc *)arg;
+	struct mmc_command *cmd;
+	uint32_t status, raw_status, mask;
 
+	cmd = sc->cmd;
 
+	raw_status = RD4(sc, MCI_STATUS);
+	mask = RD4(sc, MCI_MASK0);
+	status = raw_status & mask;
+	WR4(sc, MCI_CLEAR, status);
 
+	debugf(3, "interrupt: 0x%08x raw: 0x%08x (0x%08x)\n", status,
+	    raw_status, raw_status & (MCI_SCM_CMD_ACTIVE | MCI_SCM_TXACTIVE |
+	    MCI_SCM_RXACTIVE));
 
+	if (sc->req == NULL) {
+		device_printf(sc->dev, "Stray interrupt: 0x%08x\n", status);
+		WR4(sc, MCI_CLEAR, status);
+		return;
+	}
+
+	/* Handle PIO mode data transfers */
+	if (sc->use_pio && (cmd->data != NULL)) {
+		if (MCI_HAVE_RX_DATA(raw_status)) {
+			mmci_pio_read(sc, cmd);
+		} else if (MCI_HAVE_TX_DATA(raw_status)) {
+			mmci_pio_write(sc, cmd);
+		}
+	}
+
+	/* Remember flags for multienvent actions */
+	if (status & MCI_SCM_CMD_RESP_END)
+		sc->got_respend = 1;
+	if (status & MCI_SCM_PROG_DONE)
+		sc->got_progdone = 1;
+
+	if (sc->got_respend && (!sc->prog_enabled || sc->got_progdone)) {
+		/* Command with response finished */
+		debugf(2, "command response: 0x%08X\n", RD4(sc, MCI_RESP0));
+
+		if (cmd->flags & MMC_RSP_136) {
+			cmd->resp[3] = RD4(sc, MCI_RESP3);
+			cmd->resp[2] = RD4(sc, MCI_RESP2);
+			cmd->resp[1] = RD4(sc, MCI_RESP1);
+		}
+		cmd->resp[0] = RD4(sc, MCI_RESP0);
+		cmd->error = MMC_ERR_NONE;
+		mmci_next_cmd(sc);
+	} else if (status & MCI_SCM_CMD_SENT) {
+		/* Command without response finished */
+		debugf(2, "command sent: 0x%08X\n", RD4(sc, MCI_RESP0));
+		cmd->error = MMC_ERR_NONE;
+		mmci_next_cmd(sc);
+	} else if (status & MCI_SCM_DATAEND) {
+		/* Data transfer finished */
+		debugf(3, "data end\n");
+		cmd->error = MMC_ERR_NONE;
+		cmd->resp[0] = RD4(sc, MCI_RESP0);
+		mmci_next_cmd(sc);
+	}  else if (status & MCI_SCM_CMD_CRC_FAIL) {
+		/* Command finished with error */
+		debugf(1, "command crc fail: 0x%08X\n", RD4(sc, MCI_RESP0));
+		cmd->error = cmd->flags & MMC_RSP_CRC
+		    ? MMC_ERR_BADCRC : MMC_ERR_NONE;
+		cmd->resp[0] = RD4(sc, MCI_RESP0);
+		mmci_next_cmd(sc);
+
+	} else if (status & MCI_SCM_CMD_TIMEOUT) {
+		/* Command finished with timeout */
+		debugf(1, "command timeout: 0x%08X\n", RD4(sc, MCI_RESP0));
+		cmd->error = MMC_ERR_TIMEOUT;
+		cmd->resp[0] = RD4(sc, MCI_RESP0);
+		mmci_next_cmd(sc);
+	} else if (status & (MCI_SCM_DATA_CRC_FAIL | MCI_SCM_DATA_TIMEOUT |
+	     MCI_SCM_START_BIT_ERR | MCI_SCM_TX_UNDERRUN |
+	     MCI_SCM_RX_OVERRUN)) {
+		/* Data error */
+		debugf(1, "Data error: 0x%08X\n", status);
+		if (status & MCI_SCM_DATA_TIMEOUT) {
+			cmd->error = MMC_ERR_TIMEOUT;
+		} else if (status & MCI_SCM_DATA_CRC_FAIL) {
+			cmd->error = MMC_ERR_BADCRC;
+		} else if (status & (MCI_SCM_TX_UNDERRUN | MCI_SCM_RX_OVERRUN)) {
+			cmd->error = MMC_ERR_FIFO;
+		} else {
+			cmd->error = MMC_ERR_FAILED;
+		}
+		cmd->resp[0] = RD4(sc, MCI_RESP0);
+		mmci_next_cmd(sc);
+	}
+
+	WR4(sc, MCI_CLEAR, status);
+}
 
 static int
-mmci_read_ivar(device_t bus, device_t child, int which, 
+mmci_read_ivar(device_t bus, device_t child, int which,
     uintptr_t *result)
 {
 	struct mmci_softc *sc = device_get_softc(bus);
@@ -495,7 +503,7 @@ mmci_read_ivar(device_t bus, device_t child, int which,
 		*(int *)result = sc->host.caps;
 		break;
 	case MMCBR_IVAR_MAX_DATA:
-		*(int *)result = 1;
+		*(int *)result = 1024;
 		break;
 	}
 
@@ -546,38 +554,68 @@ mmci_write_ivar(device_t bus, device_t child, int which,
 	return (0);
 }
 
+// https://searchcode.com/codesearch/view/41176635/
 static int
 mmci_update_ios(device_t bus, device_t child)
 {
 	struct mmci_softc *sc = device_get_softc(bus);
 	struct mmc_ios *ios = &sc->host.ios;
-	uint32_t clkdiv, pwr = 0;
+	uint32_t clkreg, pwr;
+	int rv;
+	uint64_t freq;
+
+	clkreg = 0;
+	if (ios->bus_width == bus_width_8) {
+		debugf(1, "using 8 bits wide bus mode\n");
+		clkreg |= MCI_CLOCK_QCOM_BUS_8;
+	} else if (ios->bus_width == bus_width_4) {
+		debugf(1, "using 4 bits wide bus mode\n");
+		clkreg |= MCI_CLOCK_QCOM_BUS_4;
+	} else {
+		clkreg |= MCI_CLOCK_QCOM_BUS_1;
+	}
+
+	clkreg |= MCI_CLOCK_QCOM_FLOW_ENA;
+
+	clkreg |= MCI_CLOCK_QCOM_SELECT_FBCLK;
+/*
+	if (ios->timing == MMC_TIMING_UHS_SDR104) {
+		clk |= MCI_CLOCK_QCOM_SELECT_UHS;
+		host->tuning_needed = 1;
+	} else if (ios->timing == MMC_TIMING_UHS_DDR50) {
+		clk |= MCI_CLOCK_QCOM_SELECT_DDR;
+	} else {
+		clk |= MCI_CLOCK_QCOM_SELECT_FBCLK;
+	}
+*/
+	/* Select free running MCLK as input clock of cm_dll_sdc4 */
+	clkreg |= MCI_CLOCK_QCOM_MCLK_SEL_FREE;
 
 	if (ios->clock != 0) {
-		/* Calculate clock divider */
-		clkdiv = (sc->clk_freq  / (2 * ios->clock)) - 1;
-
-		/* Clock rate should not exceed rate requested in ios */
-		if ((sc->clk_freq / (2 * (clkdiv + 1))) > ios->clock)
-			clkdiv++;
-		if (clkdiv > 255)
-			clkdiv = 255;
-		
-		if (ios->bus_width == bus_width_4) {
-			debugf("using wide bus mode\n");
-			clkdiv |= MCI_CLOCK_WIDEBUS;
-		}		
-		clkdiv |= MCI_CLOCK_QCOM_FLOW_ENA; 
-		clkdiv |= MCI_CLOCK_QCOM_SELECT_FBCLK;
-		clkdiv |= MCI_CLOCK_ENABLE;
-	} else {
-		clkdiv = 0;
+		rv = clk_set_freq(sc->mclk, ios->clock, 1);
+		if (rv != 0) {
+			device_printf(sc->dev,
+			    "Cannot set clock frequency: %d\n", rv);
+			return (rv);
+		}
+		rv = clk_get_freq(sc->mclk, &freq);
+		if (rv != 0) {
+			device_printf(sc->dev,
+			    "Cannot get clock frequency: %d\n", rv);
+			return (rv);
+		}
+		ios->clock = freq;
+		clkreg |= MCI_CLOCK_ENABLE;
 	}
-	
-	
-	debugf("clock: %dHz, clkdiv: %d 0x%08X\n", ios->clock, clkdiv, clkdiv);
 
-	WR4(sc, MCI_CLOCK, clkdiv);
+	debugf(3, "clock: %dHz,  bus width: %d, clkreg: 0x%08X\n",
+	     ios->clock, ios->bus_width, clkreg);
+
+	WR4(sc, MCI_CLOCK, clkreg);
+	mmci_reg_wait(sc);
+
+	pwr = RD4(sc, MCI_POWER);
+	pwr &= ~MCI_POWER_CTRL_MASK;
 
 	switch (ios->power_mode) {
 	case power_off:
@@ -587,14 +625,17 @@ mmci_update_ios(device_t bus, device_t child)
 		pwr |= MCI_POWER_CTRL_UP;
 		break;
 	case power_on:
-		pwr |= sc->pwrup_cmd;
+		pwr |= MCI_POWER_CTRL_ON;
 		break;
 	}
 
 	if (ios->bus_mode == opendrain)
 		pwr |= MCI_POWER_OPENDRAIN;
+	else
+		pwr &= ~MCI_POWER_OPENDRAIN;
 
 	WR4(sc, MCI_POWER, pwr);
+	mmci_reg_wait(sc);
 
 	return (0);
 }
@@ -612,12 +653,12 @@ mmci_acquire_host(device_t bus, device_t child)
 	struct mmci_softc *sc = device_get_softc(bus);
 	int error = 0;
 
-	mmci_lock(sc);
+	LOCK(sc);
 	while (sc->bus_busy)
 		error = mtx_sleep(sc, &sc->mtx, PZERO, "mmci", 0);
 
 	sc->bus_busy++;
-	mmci_unlock(sc);
+	UNLOCK(sc);
 	return (error);
 }
 
@@ -626,10 +667,10 @@ mmci_release_host(device_t bus, device_t child)
 {
 	struct mmci_softc *sc = device_get_softc(bus);
 
-	mmci_lock(sc);
+	LOCK(sc);
 	sc->bus_busy--;
 	wakeup(sc);
-	mmci_unlock(sc);
+	UNLOCK(sc);
 	return (0);
 }
 
@@ -643,7 +684,7 @@ mmci_probe(device_t dev)
 	if (!ofw_bus_is_compatible(dev, "arm,pl18x"))
 		return (ENXIO);
 
-	device_set_desc(dev, "ARM PL18x MMC/SD controller");
+	device_set_desc(dev, "ARM PL18x MMC/SD/SDIO controller");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -652,29 +693,42 @@ static int
 parse_fdt(struct mmci_softc *sc)
 {
 	phandle_t node;
+	int bus_width;
+	int err;
 
 	if ((node = ofw_bus_get_node(sc->dev)) == -1)
 		return (ENXIO);
-
-#if 0
-	if (OF_hasprop(node, "st,sig-dir-dat0"))
-		sc->pwr_reg_add |= MCI_ST_DATA0DIREN;
-	if (OF_hasprop(node, "st,sig-dir-dat2"))
-		sc->pwr_reg_add |= MCI_ST_DATA2DIREN;
-	if (OF_hasprop(node, "st,sig-dir-dat31"))
-		sc->pwr_reg_add |= MCI_ST_DATA31DIREN;
-	if (OF_hasprop(node, "st,sig-dir-dat74"))
-		sc->pwr_reg_add |= MCI_ST_DATA74DIREN;
-	if (OF_hasprop(node, "st,sig-dir-cmd"))
-		sc->pwr_reg_add |= MCI_ST_CMDDIREN;
-	if (OF_hasprop(node, "st,sig-pin-fbclk"))
-		sc->pwr_reg_add |= MCI_ST_FBCLKEN;
-#endif
 	if (OF_hasprop(node, "mmc-cap-mmc-highspeed"))
-		sc->fdt_caps |= MMC_CAP_HSPEED;
+		sc->host.caps |= MMC_CAP_HSPEED;
 	if (OF_hasprop(node, "mmc-cap-sd-highspeed"))
-		sc->fdt_caps |= MMC_CAP_HSPEED;
+		sc->host.caps |= MMC_CAP_HSPEED;
+	if (OF_hasprop(node, "non-removable"))
+		sc->not_removable = 1;
+#if 0
+	if (OF_hasprop(node, "no-1-8-v"))
+		sc->host.host_ocr &= ~();
+#endif
+	if (OF_getencprop(node, "max-frequency", &sc->max_freq,
+	    sizeof(sc->max_freq)) <= 0)
+		sc->max_freq = 0;
 
+	if (OF_getencprop(node, "bus-width", &bus_width,
+	    sizeof(bus_width)) <= 0)
+	    bus_width = 1;
+	sc->host.caps &= ~(MMC_CAP_8_BIT_DATA | MMC_CAP_4_BIT_DATA);
+	switch (bus_width) {
+	case 8:
+		sc->host.caps |= MMC_CAP_8_BIT_DATA | MMC_CAP_4_BIT_DATA |
+		    MMC_CAP_FORCE_8_BIT_DATA;
+		break;
+	case 4:
+		sc->host.caps |= MMC_CAP_4_BIT_DATA;
+		break;
+	}
+	sc->supply_vmmc = fdt_regulator_get_by_name(sc->dev, "vmcc-supply");
+	err = ofw_gpiobus_parse_gpios(sc->dev, "cd-gpios", &sc->gpio_cd);
+	if (err != 1)
+		sc->gpio_cd = NULL;
 	return 0;
 }
 
@@ -691,13 +745,21 @@ mmci_attach(device_t dev)
 	sc->req = NULL;
 	node = ofw_bus_get_node(dev);
 
+	sc->host.host_ocr = MMC_OCR_320_330 | MMC_OCR_330_340;
+	sc->host.caps = MMC_CAP_HSPEED | MMC_CAP_4_BIT_DATA;
 	rv = parse_fdt(sc);
 	if (rv != 0) {
-		device_printf(dev, "Can't get FDT property: %d.\n", rv);
+		device_printf(dev, "Can't get FDT property: %d\n", rv);
 		return (rv);
 	}
+	rv = fdt_pinctrl_configure_by_name(dev, "default");
+	if ((rv != 0) && (rv != ENOENT)) {
+		device_printf(dev, "Can't configure FDT pinctrl: %d\n", rv);
+		return (rv);
+	}
+
 	mtx_init(&sc->mtx, "mmci", "mmc", MTX_DEF);
-	
+
 	/* Enable interface clock */
 	rv = clk_get_by_ofw_name(node, "apb_pclk", &sc->pclk);
 	if (rv != 0) {
@@ -716,28 +778,26 @@ mmci_attach(device_t dev)
 		device_printf(dev, "Cannot get core clock: %d\n", rv);
 		goto fail;
 	}
+
+//	rv = clk_set_freq(sc->mclk, 51000000, 1);
+	rv = clk_set_freq(sc->mclk,   400000, 1);
+	if (rv != 0) {
+		device_printf(dev, "Cannot set clock frequency: %d\n", rv);
+		goto fail;
+	}
+
 	rv = clk_enable(sc->mclk);
 	if (rv != 0) {
 		device_printf(dev, "Cannot enable core clock: %d\n", rv);
-		goto fail;;
-	}
-	rv = clk_get_freq(sc->mclk, &freq);
-	if (rv != 0) {
-		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
 		goto fail;
 	}
-	rv = clk_set_freq(sc->mclk, 51000000, 1);
-	if (rv != 0) {
-		device_printf(dev, "Cannot set clock frequency: %d\n", rv);
-//		goto fail;
-	}
-	rv = clk_get_freq(sc->mclk, &freq);
-	if (rv != 0) {
-		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
-		goto fail;
-	}
-device_printf(dev, "got clock: %lld\n", freq);
 
+	rv = clk_get_freq(sc->mclk, &freq);
+	if (rv != 0) {
+		device_printf(dev, "Cannot get clock frequency: %d\n", rv);
+		goto fail;
+	}
+device_printf(sc->dev, "Got frequency: %lld\n",  freq);
 	rid = 0;
 	sc->mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
 	    RF_ACTIVE);
@@ -754,18 +814,15 @@ device_printf(dev, "got clock: %lld\n", freq);
 		goto fail;
 	}
 	sc->use_pio = 1;
-	sc->pwrup_cmd = MCI_POWER_CTRL_ON;
-	
 
 	WR4(sc, MCI_MASK0, 0);
 	WR4(sc, MCI_MASK1, 0);
 	WR4(sc, MCI_CLEAR, 0xFFF);
 
 	sc->clk_freq = (int)freq;
-	sc->host.f_max = sc->clk_freq;
-	sc->host.f_min = sc->clk_freq   / 254;
-	sc->host.host_ocr = MMC_OCR_320_330 | MMC_OCR_330_340;
-	sc->host.caps = MMC_CAP_4_BIT_DATA | MMC_CAP_HSPEED;
+	sc->host.f_max = sc->max_freq == 0 ? sc->clk_freq : sc->max_freq;
+	sc->host.f_min = sc->host.f_max / 254;
+
 
 	if (bus_setup_intr(dev, sc->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
 	    NULL, mmci_intr, sc, &sc->intrhand)) {
@@ -787,13 +844,12 @@ fail:
 		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->mem_res);
 	if (sc->irq_res != NULL)
 		bus_release_resource(dev, SYS_RES_IRQ, 0, sc->irq_res);
-	return (ENXIO);	
+	return (ENXIO);
 }
 
 static int
 mmci_detach(device_t dev)
 {
-printf("%s: enter\n", __func__);
 	return (EBUSY);
 }
 
@@ -816,7 +872,7 @@ static device_method_t mmci_methods[] = {
 
 	DEVMETHOD_END
 };
-	
+
 static devclass_t mmci_devclass;
 
 static driver_t mmci_driver = {
