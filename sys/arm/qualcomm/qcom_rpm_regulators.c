@@ -37,7 +37,6 @@
 
 #include <machine/bus.h>
 
-#include <dev/fdt/fdt_common.h>
 #include <dev/fdt/fdt_regulator.h>
 #include <dev/fdt/simplebus.h>
 #include <dev/ofw/ofw_bus_subr.h>
@@ -524,7 +523,7 @@ qcom_rpm_regs_attach(device_t dev)
 
 	/* Attach all known regulators if exist in DT */
 	for (i = 0; i < sc->reg_count; i++) {
-		child = fdt_find_child(node, sc->reg_list[i].name);
+		child = ofw_bus_find_child(node, sc->reg_list[i].name);
 		if (child == 0)
 			continue;
 		reg = qcom_rpm_attach_regulator(sc, child, sc->reg_list + i);
