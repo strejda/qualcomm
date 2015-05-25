@@ -164,7 +164,7 @@ static struct clk_pll_def pll_tbl[] = {
  PLL(PLL14, "pll14", p_pxo_cxo,   0x31C0, 0x31C4, 0x31C8, 0x31CC, 0x31D4, 0x31D8, 16, &pll14_cfg),
 };
 
-#define HFPLL(_id, cn, plist, mr, l, m, n, cr, sr, dr)			\
+#define HFPLL(_id, cn, plist, mr, cr, l, m, n, dr, sr)			\
 {									\
 	.clkdef.id = _id,						\
 	.clkdef.name = cn,						\
@@ -180,11 +180,11 @@ static struct clk_pll_def pll_tbl[] = {
 }
 
 static struct clk_hfpll_def hfpll_tbl[] = {
- HFPLL(PLL9,  "pll9",  p_pxo, 0x3200, 0x3208, 0x320c, 0x3210, 0x3204, 0x3204, 0x3214), /* SC_PLL0 in TRM */
- HFPLL(PLL10, "pll10", p_pxo, 0x3240, 0x3248, 0x324c, 0x3250, 0x3244, 0x325c, 0x3254), /* SC_PLL1 in TRM */
- HFPLL(PLL16, "pll16", p_pxo, 0x3280, 0x3288, 0x328c, 0x3290, 0x3284, 0x329c, 0x3294), /* SC_PLL2 in TRM*/
- HFPLL(PLL17, "pll17", p_pxo, 0x32c0, 0x32c8, 0x32cc, 0x32d0, 0x32c4, 0x32dc, 0x32d4), /* SC_PLL3 in TRM*/
- HFPLL(PLL12, "pll12", p_pxo, 0x3300, 0x3308, 0x330c, 0x3310, 0x3304, 0x331c, 0x3314), /* SC_L2_PLL3 in TRM */
+ HFPLL(PLL9,  "hfpll0",   p_pxo, 0x3200, 0x3204, 0x3208, 0x320c, 0x3210, 0x3214, 0x321c), /* SC_PLL0 in TRM */
+ HFPLL(PLL10, "hfpll1",   p_pxo, 0x3240, 0x3244, 0x3248, 0x324c, 0x3250, 0x3254, 0x325c), /* SC_PLL1 in TRM */
+ HFPLL(PLL16, "hfpll2",   p_pxo, 0x3280, 0x3284, 0x3288, 0x328c, 0x3290, 0x3294, 0x329c), /* SC_PLL2 in TRM*/
+ HFPLL(PLL17, "hfpll3",   p_pxo, 0x32c0, 0x32c4, 0x32c8, 0x32cc, 0x32d0, 0x32d4, 0x32dc), /* SC_PLL3 in TRM*/
+ HFPLL(PLL12, "hfpll_l2", p_pxo, 0x3300, 0x3304, 0x3308, 0x330c, 0x3310, 0x3314, 0x331c), /* SC_L2_PLL3 in TRM */
 };
 
 

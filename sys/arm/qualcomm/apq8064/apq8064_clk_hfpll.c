@@ -316,7 +316,7 @@ apg8064_hfpll_register(struct clkdom *clkdom, struct clk_hfpll_def *clkdef)
 	sc->l_reg = clkdef->l_reg;
 	sc->m_reg = clkdef->m_reg;
 	sc->n_reg = clkdef->n_reg;
-	sc->cfg_reg = clkdef->cfg_reg;
+	sc->status_reg = clkdef->status_reg;
 	sc->mode_reg = clkdef->mode_reg;
 	sc->droop_reg = clkdef->droop_reg;
 	sc->cfg_reg = clkdef->cfg_reg;
