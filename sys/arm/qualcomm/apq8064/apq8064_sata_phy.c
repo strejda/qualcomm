@@ -22,9 +22,10 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -312,10 +313,10 @@ sataphy_phy_cfg(device_t dev, int id, int val)
 	int rv = 0;
 
 	sc = device_get_softc(dev);
-	if (val != 0)
+//	if (val != 0)
 		rv = sataphy_enable(sc);
-	else
-		rv = sataphy_disable(sc);
+//	else
+//		rv = sataphy_disable(sc);
 	return (rv);
 }
 
