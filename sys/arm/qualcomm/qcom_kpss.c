@@ -164,7 +164,7 @@ qcom_kpss_probe(device_t dev)
 		return (ENXIO);
 
 	if (ofw_bus_search_compatible(dev, compat_data)->ocd_data != 0) {
-		device_set_desc(dev, "Qualcomm KPSS clock Driver");
+		device_set_desc(dev, "Qualcomm KPSS clock");
 		return (BUS_PROBE_DEFAULT);
 	}
 
