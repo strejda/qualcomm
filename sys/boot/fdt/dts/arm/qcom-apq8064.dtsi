@@ -487,7 +487,13 @@
 			clocks = <&sleep_clk>;
 			timeout-sec = <10>;
 		};
-
+/* See syscon
+		l2cc: clock-controller@2011000 {
+			compatible = "qcom,kpss-gcc";
+			reg = <0x2011000 0x1000>;
+			clock-output-names = "acpu_l2_aux";
+ 		};
+*/
 		acc0: clock-controller@2088000 {
 			compatible = "qcom,kpss-acc-v1";
 			reg = <0x02088000 0x1000>, <0x02008000 0x1000>;

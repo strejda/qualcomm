@@ -28,9 +28,11 @@ arm/qualcomm/qcom_rpm.c			standard
 arm/qualcomm/qcom_rpm_if.m		standard
 arm/qualcomm/qcom_rpm_regulators.c	optional	fdt_regulator
 arm/qualcomm/qcom_pcie.c		optional	pci
+arm/qualcomm/qcom_pm8921.c		standard
 arm/qualcomm/qcom_otg_phy.c		optional	ehci
 arm/qualcomm/qcom_ehci.c		optional	ehci
 arm/qualcomm/qcom_kpss.c		standard
+arm/qualcomm/qcom_krait_cc.c		standard
 arm/qualcomm/apq8064/apq8064_machdep.c	standard
 arm/qualcomm/apq8064/apq8064_mp.c	optional	smp
 arm/qualcomm/apq8064/apq8064_timer.c	standard
