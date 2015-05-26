@@ -56,6 +56,10 @@ __FBSDID("$FreeBSD$");
 
 #define GEN_AHCI_MAX_CLKS	16
 
+
+#define	WR4(_sc, _r, _v)	bus_write_4((_sc)->ctlr.r_mem, (_r), (_v))
+#define	RD4(_sc, _r)		bus_read_4((_sc)->ctlr.r_mem, (_r))
+
 static struct ofw_compat_data compat_data[] = {
 	{"generic-ahci", 	1},
 	{NULL,			0}
@@ -70,6 +74,7 @@ struct  assigned_clk {
 struct gen_ahci_sc {
 	struct ahci_controller	ctlr;	/* Must be first */
 	device_t		dev;
+	int			port_mask;
 	regulator_t		supply_target;
 	phy_t			phy;
 	clk_t			clks[GEN_AHCI_MAX_CLKS];
@@ -112,6 +117,11 @@ enable_fdt_resources(struct gen_ahci_sc *sc)
 		device_printf(sc->dev, "Cannot enable  \"target\" regulator\n");
 		return (rv);
 	}
+
+	/* XXX Use assigned clock */
+	rv = clk_set_freq(sc->clks[3], 100000000, 1);
+	rv = clk_set_freq(sc->clks[4], 100000000, 1);
+
 	for (i = 0; (i < GEN_AHCI_MAX_CLKS) && (sc->clks[i] != NULL); i++) {
 		rv = clk_enable(sc->clks[i]);
 		if (rv != 0) {
@@ -126,6 +136,32 @@ enable_fdt_resources(struct gen_ahci_sc *sc)
 		return (rv);
 	}
 
+	return (0);
+}
+
+static int
+gen_ahci_ctlr_reset(device_t dev)
+{
+	struct gen_ahci_sc *sc;
+	int rv;
+	uint32_t val;
+	uint32_t max_ports;
+
+	sc = device_get_softc(dev);
+
+	rv = ahci_ctlr_reset(dev);
+	if (rv != 0)
+		return (0);
+
+	/* Praper write once registers */
+	val  = RD4(sc, AHCI_CAP);
+	val |= AHCI_CAP_SSS;
+	WR4(sc, AHCI_CAP, val);
+
+	max_ports = val & AHCI_CAP_NPMASK;
+	val = sc->port_mask;
+	val &= (max_ports - 1);
+	WR4(sc, AHCI_PI, val);
 	return (0);
 }
 
@@ -176,21 +212,23 @@ gen_ahci_attach(device_t dev)
 		goto fail;
 	}
 
-	ctlr->quirks =  AHCI_Q_FORCE_PI;
+//	ctlr->quirks =  AHCI_Q_FORCE_PI | AHCI_Q_RESTORE_CAP | AHCI_Q_EDGEIS;
 
 //	ctlr->vendorid = pci_get_vendor(dev);
 //	ctlr->deviceid = pci_get_device(dev);
 //	ctlr->subvendorid = pci_get_subvendor(dev);
 //	ctlr->subdeviceid = pci_get_subdevice(dev);
 
-	/* Setup interrupts. */
+	/* Setup controller defaults. */
 	ctlr->msi = 0;
 	ctlr->numirqs = 1;
+	ctlr->ccc = 1;
+	sc->port_mask = 1;
 
 	/* Reset controller */
-//	if ((rv = ahci_ctlr_reset(dev)) != 0) {
-//		goto fail;
-//	}
+	if ((rv = gen_ahci_ctlr_reset(dev)) != 0) {
+		goto fail;
+	}
 
 	rv = ahci_attach(dev);
 	return (rv);
@@ -228,7 +266,7 @@ gen_ahci_resume(device_t dev)
 {
 	int res;
 
-	if ((res = ahci_ctlr_reset(dev)) != 0)
+	if ((res = gen_ahci_ctlr_reset(dev)) != 0)
 		return (res);
 	ahci_ctlr_setup(dev);
 	return (bus_generic_resume(dev));

@@ -208,9 +208,11 @@ sataphy_enable(struct sataphy_softc *sc)
 	int rv;
 
 	/* Take phy to defined state */
-//	WR4(sc, SATA_PHY_RESET_CTRL, 0x01);
-//	DELAY(10);
-//	WR4(sc, SATA_PHY_RESET_CTRL, 0x00);
+	WR4(sc, SATA_PHY_RESET_CTRL, 0x01);
+	DELAY(10);
+	WR4(sc, SATA_PHY_RESET_CTRL, 0x00);
+	DELAY(10);
+
 	WR4(sc, SATA_PHY_SER_CTRL, 0x01);
 	WR4(sc, SATA_PHY_POW_DWN_CTRL0, 0xB1);
 	RD4(sc, SATA_PHY_POW_DWN_CTRL0);
@@ -313,10 +315,10 @@ sataphy_phy_cfg(device_t dev, int id, int val)
 	int rv = 0;
 
 	sc = device_get_softc(dev);
-//	if (val != 0)
+	if (val != 0)
 		rv = sataphy_enable(sc);
-//	else
-//		rv = sataphy_disable(sc);
+	else
+		rv = sataphy_disable(sc);
 	return (rv);
 }
 

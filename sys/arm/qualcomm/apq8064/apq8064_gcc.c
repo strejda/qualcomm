@@ -563,10 +563,9 @@ clknode_set_freq(clknode, 1843200, 1, 1);
 	clknode_set_parent_by_name(clknode, "pll8_vote");
 	clknode = clknode_find_by_name(sc->clkdom, "sdc4_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
+
 	clknode = clknode_find_by_name(sc->clkdom, "sata_clk_src");
 	clknode_set_parent_by_name(clknode, "pll3_vote");
-clknode_set_freq(clknode, 100000000, 1, 1);
-
 
 	clknode = clknode_find_by_name(sc->clkdom, "usb_hs1_xcvr_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
@@ -582,11 +581,6 @@ clknode_set_freq(clknode, 100000000, 1, 1);
 	clknode_set_freq(clknode, 60000000, 1, 1);
 	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_xcvr_fs_src");
 	clknode_set_parent_by_name(clknode, "pll8_vote");
-	clknode_set_freq(clknode, 60000000, 1, 1);
-
-	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_hsic_clk");
-	clknode_set_freq(clknode, 480000000, 1, 1);
-	clknode = clknode_find_by_name(sc->clkdom, "usb_hsic_system_clk");
 	clknode_set_freq(clknode, 60000000, 1, 1);
 
 	clkdom_finit(sc->clkdom);
