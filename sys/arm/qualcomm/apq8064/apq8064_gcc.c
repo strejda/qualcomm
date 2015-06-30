@@ -43,7 +43,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/clk/clk_gate.h>
 #include <dev/clk/clk_mux.h>
 #include <dev/fdt/fdt_reset.h>
-#include <dev/ofw/openfirm.h>
+#include <dev/fdt/simplebus.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -94,6 +94,7 @@ struct reset {
 };
 
 struct apq8064_gcc_softc {
+	struct simplebus_softc	simplebus_sc; /* Must be first */
 	device_t		dev;
 	struct resource *	mem_res;
 	struct mtx		mtx;
@@ -671,12 +672,14 @@ static int
 apq8064_gcc_attach(device_t dev)
 {
 	struct apq8064_gcc_softc *sc = device_get_softc(dev);
+	phandle_t node;
 	int rid, rv;
 
 	sc->dev = dev;
 
 	mtx_init(&sc->mtx, device_get_nameunit(dev), NULL, MTX_DEF);
 	sc->type = ofw_bus_search_compatible(dev, compat_data)->ocd_data;
+	node = ofw_bus_get_node(sc->dev);
 
 	/* Resource setup. */
 	rid = 0;
@@ -690,7 +693,10 @@ apq8064_gcc_attach(device_t dev)
 	register_clocks(dev);
 	fdt_reset_register_provider(dev);
 
-	return (0);
+	simplebus_init(dev, 0);
+	for (node = OF_child(node); node > 0;  node = OF_peer(node))
+		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
+	return (bus_generic_attach(dev));
 
 fail:
 	if (sc->mem_res)
@@ -723,12 +729,8 @@ static device_method_t apq8064_gcc_methods[] = {
 };
 
 static devclass_t apq8064_gcc_devclass;
-
-static driver_t apq8064_gcc_driver = {
-	"apq8064_gcc",
-	apq8064_gcc_methods,
-	sizeof(struct apq8064_gcc_softc),
-};
+DEFINE_CLASS_1(apq8064_gcc, apq8064_gcc_driver, apq8064_gcc_methods,
+    sizeof(struct apq8064_gcc_softc), simplebus_driver);
 
 EARLY_DRIVER_MODULE(apq8064_gcc, simplebus, apq8064_gcc_driver,
     apq8064_gcc_devclass, 0, 0, BUS_PASS_TIMER);
