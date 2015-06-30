@@ -397,7 +397,7 @@ ofw_bus_reg_to_rl(device_t dev, phandle_t node, pcell_t acells, pcell_t scells,
 	 */
 	ret = OF_getprop_alloc(node, "name", sizeof(*name), (void **)&name);
 	if (ret == -1)
-		name = NULL;
+		name = "unknown";
 
 	ret = OF_getencprop_alloc(node, "reg", sizeof(*reg), (void **)&reg);
 	nreg = (ret == -1) ? 0 : ret;
@@ -405,7 +405,7 @@ ofw_bus_reg_to_rl(device_t dev, phandle_t node, pcell_t acells, pcell_t scells,
 	if (nreg % (acells + scells) != 0) {
 		if (bootverbose)
 			device_printf(dev, "Malformed reg property on <%s>\n",
-			    (name == NULL) ? "unknown" : name);
+			    name);
 		nreg = 0;
 	}
 
