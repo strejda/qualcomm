@@ -112,8 +112,7 @@ pm8921_attach(device_t dev)
 	node = ofw_bus_get_node(sc->dev);
 
 	simplebus_init(dev, 0);
-	for (node = OF_child(node); node > 0;
-	    node = OF_peer(node))
+	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
 	return (bus_generic_attach(dev));
 }

@@ -266,8 +266,7 @@ ssbi_attach(device_t dev)
 
 	sc->type = ssbi_get_ctrl_mode(dev, node);
 	simplebus_init(dev, 0);
-	for (node = OF_child(node); node > 0;
-	    node = OF_peer(node))
+	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
 	return (bus_generic_attach(dev));
 fail:
