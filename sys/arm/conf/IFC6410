@@ -1,4 +1,4 @@
-# Kernel configuration for Jetson TK1 board
+# Kernel configuration for Inforce IFC6410 board
 #
 # For more information on this file, please read the config(5) manual page,
 # and/or the handbook section on Kernel Configuration Files:
@@ -33,7 +33,8 @@ options 	BOOTHOWTO=RB_SINGLE
 options 	ARM_NEW_PMAP
 
 # U-Boot stuff lives on slice 1, FreeBSD on slice 2.
-options 	ROOTDEVNAME=\"ufs:mmcsd1s2a\"
+#options 	ROOTDEVNAME=\"ufs:mmcsd1s2a\"
+options 	ROOTDEVNAME=\"ufs:ada0s2a\"
 
 option		SOCDEV_PA=0x16600000
 option		SOCDEV_VA=0x16600000
