@@ -11,9 +11,10 @@ arm/arm/gic.c				standard
 arm/arm/syscon.c			standard
 arm/arm/syscon_if.m			standard
 kern/kern_clocksource.c			standard
+dev/ofw/ofw_cpu.c			optional	fdt
 
 arm/qualcomm/ahci_generic.c		optional	ahci
-
+arm/qualcomm/ofw_eeprom.c		optional	iicbus
 #
 # Standard SOC devices and support.
 #
@@ -29,10 +30,17 @@ arm/qualcomm/qcom_rpm_if.m		standard
 arm/qualcomm/qcom_rpm_regulators.c	optional	fdt_regulator
 arm/qualcomm/qcom_pcie.c		optional	pci
 arm/qualcomm/qcom_pm8921.c		standard
+arm/qualcomm/qcom_pm8921_gpio.c		optional	fdt_pinctrl
 arm/qualcomm/qcom_otg_phy.c		optional	ehci
 arm/qualcomm/qcom_ehci.c		optional	ehci
 arm/qualcomm/qcom_kpss.c		standard
 arm/qualcomm/qcom_krait_cc.c		standard
+arm/qualcomm/qcom_tsens.c		standard
+arm/qualcomm/qcom_tsens_if.m		standard
+arm/qualcomm/qcom_qfprom.c		standard
+arm/qualcomm/qcom_qfprom_if.m		standard
+arm/qualcomm/qcom_i2c.c			optional	iicbus
+
 arm/qualcomm/apq8064/apq8064_machdep.c	standard
 arm/qualcomm/apq8064/apq8064_mp.c	optional	smp
 arm/qualcomm/apq8064/apq8064_timer.c	standard
@@ -44,7 +52,8 @@ arm/qualcomm/apq8064/apq8064_mcc.c	standard
 arm/qualcomm/apq8064/apq8064_gcc.c	standard
 arm/qualcomm/apq8064/apq8064_pinctrl.c	optional	fdt_pinctrl
 arm/qualcomm/apq8064/apq8064_sata_phy.c	optional	ahci
-
+arm/qualcomm/apq8064/apq8064_cpufreq.c	standard
+arm/qualcomm/apq8064/apq8064_coretemp.c	standard
 #
 # Board devices.
 #
