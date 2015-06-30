@@ -113,6 +113,11 @@ static struct clk_fixed_def qsb_clk = {
 	FRATE(DUMMY_CLK_ID, "qsb", 1)
 };
 
+/* Temporary L2_AUX clock */
+static struct clk_fixed_def acpu_l2_aux_clk = {
+	FRATE(DUMMY_CLK_ID, "acpu_l2_aux", 1)
+};
+
 /* Muxes */
 PLIST(pri_mux_srcs) = {NULL, NULL, NULL, NULL};
 static struct clk_mux_def pri_mux;
@@ -132,7 +137,7 @@ set_cp15_l2_reg(uint32_t addr, uint32_t val)
 	/* l2cpdr" */
 	__asm volatile ("mcr p15, 3, %0, c15, c0, 7" : : "r" (val));
 	isb();
-printf("%s: addr: 0x%08X val: 0x%08X\n", __func__, addr, val);
+//printf("%s: addr: 0x%08X val: 0x%08X\n", __func__, addr, val);
 }
 
 static uint32_t
@@ -145,7 +150,7 @@ get_cp15_l2_reg(uint32_t addr)
 	isb();
 	/* l2cpdr" */
 	__asm volatile ("mrc p15, 3, %0, c15, c0, 7" : "=r" (val));
-printf("%s: addr: 0x%08X val: 0x%08X\n", __func__, addr, val);
+//printf("%s: addr: 0x%08X val: 0x%08X\n", __func__, addr, val);
 	return (val);
 }
 
@@ -242,7 +247,7 @@ register_clk(struct qcom_krait_cc_softc *sc, int id, char *name,
 
 
 static int
-fixup_clk(struct qcom_krait_cc_softc *sc, char *name)
+fixup_clk(struct qcom_krait_cc_softc *sc, char *name, uint64_t freq)
 {
 	int rv;
 	char pri_mux_name[32];
@@ -257,22 +262,22 @@ fixup_clk(struct qcom_krait_cc_softc *sc, char *name)
 
 	/* Switch to safe slow clock first */
 	clknode = clknode_find_by_name(sc->clkdom, sec_mux_name);
-	KASSERT(clknode != NULL, (sec_mux_name));
+	KASSERT(clknode != NULL, ("%s", sec_mux_name));
 	rv = clknode_set_parent_by_name(clknode, "qsb");
 
 	clknode = clknode_find_by_name(sc->clkdom, pri_mux_name);
-	KASSERT(clknode != NULL, (pri_mux_name));
+	KASSERT(clknode != NULL, ("%s", pri_mux_name));
 	rv = clknode_set_parent_by_name(clknode, sec_mux_name);
 
 	/* Set HFPLL to base startup frequency and enable it  */
 	clknode = clknode_find_by_name(sc->clkdom, hfpll_name);
-	KASSERT(clknode != NULL, (hfpll_name));
-//	rv = clknode_set_freq(clknode, freq, 1, 1);
+	KASSERT(clknode != NULL, ("%s", hfpll_name));
+	rv = clknode_set_freq(clknode, freq, 1, 1);
 	rv = clknode_enable(clknode);
 
 	/* And switch to HFPLL */
 	clknode = clknode_find_by_name(sc->clkdom, pri_mux_name);
-	KASSERT(clknode != NULL, (pri_mux_name));
+	KASSERT(clknode != NULL, ("%s", pri_mux_name));
 	rv = clknode_set_parent_by_name(clknode, hfpll_name);
 
 	return (0);
@@ -309,20 +314,24 @@ register_clocks(struct qcom_krait_cc_softc *sc)
 		}
 	}
 
-#if 0 /* See DTS file - AUX ACC is in collision with syscon */
+	/* See DTS file - AUX ACC is in collision with syscon */
+	rv = clknode_fixed_register(sc->clkdom, &acpu_l2_aux_clk);
+	if (rv != 0) {
+		device_printf(sc->dev, "Cannot register APU_L2_AUX clock.\n");
+		return (rv);
+	}
 	/* L2 apps clock */
 	rv = register_clk(sc, -1, "_l2", 0x500);
 	if (rv != 0) {
 		device_printf(sc->dev, "Cannot register L2 apps clock.\n");
 		return (rv);
 	}
-#endif
 
 	clkdom_finit(sc->clkdom);
-
+	fixup_clk(sc, "_l2", 1188000000);
 	for (i = 1; i < SOC_CORES; i++) {
 		sprintf(cpuname, "%d", i);
-		rv = fixup_clk(sc, cpuname);
+		rv = fixup_clk(sc, cpuname, 918000000);
 		if (rv != 0) {
 			device_printf(sc->dev, "Cannot fixup CPU clock.\n");
 			return (rv);

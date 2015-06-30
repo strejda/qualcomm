@@ -180,7 +180,7 @@ apg8064_hfpll_recalc(struct clknode *clk, uint64_t *freq)
 
 	sc = clknode_get_softc(clk);
 
-	l = RD4(sc, sc->l_reg) & 0x3FF;
+	l = RD4(sc, sc->l_reg) & 0x7F;
 	m = RD4(sc, sc->m_reg) & 0x7FFFF;
 	n = RD4(sc, sc->n_reg) & 0x7FFFF;
 	cfg = RD4(sc, sc->cfg_reg);
@@ -229,71 +229,51 @@ apg8064_hfpll_set_gate(struct clknode *clk, int enable)
 	return (0);
 }
 
-#if 0
-static void
-configure_hfpll(struct clknode *clk, const struct clk_hfpll_cfg *cfg,
-    uint32_t bias_cnt, uint32_t lock_cnt)
+static int
+apg8064_hfpll_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
+   uint64_t *prec, int *stop)
 {
 	struct hfpll_sc *sc;
-	uint32_t val;
+	uint32_t l, m, n, cfg, mode;
+	uint64_t rate;
+	uint64_t tmp;
 
 	sc = clknode_get_softc(clk);
 
-	if ((RD4(sc, sc->status_reg) & HFPLL_ACTIVE_FLAG) != 0)
-		return;
 
-	/* PLL registers */
-	WR4(sc, sc->l_reg, cfg->l_val);
-	WR4(sc, sc->m_reg, cfg->m_val);
-	WR4(sc, sc->n_reg, cfg->n_val);
+	l = RD4(sc, sc->l_reg) & 0x7F;
+	m = RD4(sc, sc->m_reg) & 0x7FFFF;
+	n = RD4(sc, sc->n_reg) & 0x7FFFF;
+	cfg = RD4(sc, sc->cfg_reg);
+	mode = RD4(sc, sc->mode_reg);
+	l = *fout / fin;
+	WR4(sc, sc->l_reg, l);
 
-	/* merge config bits */
-	val = RD4(sc, sc->cfg_reg);
+printf("%s\n", __func__);
+printf(" Parent: %lld, l: 0x%08X, m: 0x%08X, n: 0x%08X,  mode: 0x%08X,  cfg: 0x%08X\n", *fout, l, m, n, mode, cfg);
+printf("  l: 0x%08X, m: 0x%08X, n: 0x%08X,  cfg: 0x%08X\n", sc->l_reg, sc->m_reg, sc->n_reg, sc->cfg_reg);
+//	if (not_locked)
+//		return (EINVAL);
 
-	val &= ~cfg->mn_ena_mask;
-	val |= cfg->mn_ena_val;
-
-	val &= ~cfg->main_output_mask;
-	val |= cfg->main_output_val;
-
-	val &= ~cfg->pre_div_mask;
-	val |= cfg->pre_div_val;
-
-	val &= ~cfg->post_div_mask;
-	val |= cfg->post_div_val;
-
-	val &= ~cfg->vco_mask;
-	val |= cfg->vco_val;
-	WR4(sc, sc->cfg_reg, val);
-
-	if (cfg->fsm_mode) {
-		val = RD4(sc, sc->mode_reg);
-
-		val &= ~HFPLL_VOTE_FSM_RESET;
-		WR4(sc, sc->mode_reg, val);
-
-		val &= ~(HFPLL_BIAS_COUNT_MASK << HFPLL_BIAS_COUNT_SHIFT);
-		val |= bias_cnt << HFPLL_BIAS_COUNT_SHIFT;
-		WR4(sc, sc->mode_reg, val);
-
-		val &= ~(HFPLL_LOCK_COUNT_MASK << HFPLL_LOCK_COUNT_SHIFT);
-		val |= lock_cnt << HFPLL_LOCK_COUNT_SHIFT;
-		WR4(sc, sc->mode_reg, val);
-
-		val |= HFPLL_VOTE_FSM_ENA;
-		WR4(sc, sc->mode_reg, val);
-
+	/* VCO = REF * [L+(M/N)] / (2 * P) */
+	rate = fin * l;
+	if (n && (cfg & MN_ACCUM_ENA)) {
+		tmp = fin;
+		tmp *= m;
+		tmp /= n;
+		rate += tmp;
 	}
+	*fout = rate;
+	*stop = 1;
+	return (0);
 }
-
-#endif
 
 static clknode_method_t apg8064_hfpll_methods[] = {
 	/* Device interface */
 	CLKNODEMETHOD(clknode_init,		apg8064_hfpll_init),
 	CLKNODEMETHOD(clknode_recalc_freq,	apg8064_hfpll_recalc),
 	CLKNODEMETHOD(clknode_set_gate,		apg8064_hfpll_set_gate),
-//	CLKNODEMETHOD(clknode_set_freq,		apg8064_hfpll_set_freq),
+	CLKNODEMETHOD(clknode_set_freq,		apg8064_hfpll_set_freq),
 	CLKNODEMETHOD_END
 };
 DEFINE_CLASS_1(apg8064_hfpll, apg8064_hfpll_class, apg8064_hfpll_methods,
@@ -324,8 +304,7 @@ apg8064_hfpll_register(struct clkdom *clkdom, struct clk_hfpll_def *clkdef)
 	sc->droop_val = 0x0108c000;
 
 	clknode_register(clkdom, clk);
-//	if (clkdef->cfg != NULL)
-//		configure_hfpll(clk, clkdef->cfg, 1, 8);
+
 	return (0);
 }
 
