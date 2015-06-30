@@ -205,16 +205,12 @@ init_secondary(int cpu)
 	vfp_init();
 #endif
 
+	/* Serialize CPUs startup */
 	mtx_lock_spin(&ap_boot_mtx);
 
 	atomic_add_rel_32(&smp_cpus, 1);
 
-	if (smp_cpus == mp_ncpus) {
-		/* enable IPI's, tlb shootdown, freezes etc */
-		atomic_store_rel_int(&smp_started, 1);
-	}
-
-	mtx_unlock_spin(&ap_boot_mtx);
+	platform_mp_init_secondary();
 
 #ifndef ARM_INTRNG
 	/* Enable ipi */
@@ -226,13 +222,17 @@ init_secondary(int cpu)
 	end = IPI_IRQ_START;
 #endif
 #endif
-
 	for (int i = start; i <= end; i++)
 		arm_unmask_irq(i);
 #endif /* INTRNG */
-	enable_interrupts(PSR_I);
 
-	platform_mp_init_secondary();
+
+	if (smp_cpus == mp_ncpus) {
+		/* enable IPI's, tlb shootdown, freezes etc */
+		atomic_store_rel_int(&smp_started, 1);
+	}
+
+	mtx_unlock_spin(&ap_boot_mtx);
 
 	loop_counter = 0;
 	while (smp_started == 0) {
@@ -244,6 +244,8 @@ init_secondary(int cpu)
 
 	/* Start per-CPU event timers. */
 	cpu_initclocks_ap();
+
+	enable_interrupts(PSR_A | PSR_I); /* XXX Why not PSR_F */
 
 	/* Enter the scheduler */
 	CTR0(KTR_SMP, "go into scheduler");
