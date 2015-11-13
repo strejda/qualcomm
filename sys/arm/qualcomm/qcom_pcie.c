@@ -78,7 +78,7 @@ __FBSDID("$FreeBSD$");
 #include "pcib_if.h"
 
 
-#define QCOM_PCI_MSI
+//#define QCOM_PCI_MSI
 
 #define LOCK(_sc)			mtx_lock(&(_sc)->mtx)
 #define	UNLOCK(_sc)			mtx_unlock(&(_sc)->mtx)
@@ -552,8 +552,6 @@ qcom_pcib_release_msi(device_t dev, device_t child, int count, int *irqs)
 	return (0);
 }
 
-#endif /* QCOM_PCI_MSI */
-
 static void
 qcom_pci_run_irqs(struct qcom_pcib_softc *sc, struct intr_event *ie)
 {
@@ -600,7 +598,7 @@ qcom_pci_intr(void *arg)
 
 	return (rv);
 }
-
+#endif /* QCOM_PCI_MSI */
 
 /*
  * Resource manager
@@ -1322,13 +1320,14 @@ printf("Got %d ranges \n", nranges);
 		err = ENXIO;
 		goto out;
 	}
-
+#ifdef QCOM_PCI_MSI
 	if (bus_setup_intr(dev, sc->msi_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
 			   qcom_pci_intr, NULL, sc, &sc->msi_intr_cookie)) {
 		device_printf(dev, "cannot setup interrupt handler\n");
 		err = ENXIO;
 		goto out;
 	}
+#endif
 
 	device_add_child(dev, "pci", -1);
 #if 0
